@@ -15,8 +15,30 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    groups:
+      # Kubernetes ecosystem - must be updated together
+      kubernetes:
+        patterns:
+          - "kube*"
+          - "k8s-openapi"
+        update-types:
+          - "minor"
+          - "patch"
+      # HTTP/web server dependencies
+      web-framework:
+        patterns:
+          - "axum*"
+          - "tower*"
+          - "hyper*"
+        update-types:
+          - "minor"
+          - "patch"
+      # All other patch updates
+      patch-updates:
+        update-types:
+          - "patch"
 
-  # GitHub Actions
+  # GitHub Actions - group all actions updates together
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -28,3 +50,7 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
