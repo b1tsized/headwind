@@ -1,11 +1,11 @@
 use crate::models::update::{ApprovalRequest, UpdateRequest, UpdateStatus};
 use anyhow::Result;
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use std::collections::HashMap;
 use std::sync::Arc;

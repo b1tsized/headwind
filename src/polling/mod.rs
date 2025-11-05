@@ -117,11 +117,11 @@ impl RegistryPoller {
         let cache = self.cache.read().await;
         let cached_tag = cache.get(image);
 
-        if let Some(cached) = cached_tag {
-            if cached == latest_tag {
-                // No change
-                return Ok(None);
-            }
+        if let Some(cached) = cached_tag
+            && cached == latest_tag
+        {
+            // No change
+            return Ok(None);
         }
         drop(cache);
 

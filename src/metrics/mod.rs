@@ -1,5 +1,5 @@
 use anyhow::Result;
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use lazy_static::lazy_static;
 use prometheus::{Encoder, Histogram, HistogramOpts, IntCounter, IntGauge, Registry, TextEncoder};
 use tokio::task::JoinHandle;
