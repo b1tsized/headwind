@@ -46,7 +46,11 @@ wildcards = "warn"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
-allow = []
+allow = [
+    # Allow unmaintained crates that are transitive dependencies from kube-runtime
+    { name = "backoff" },
+    { name = "instant" },
+]
 deny = [
     # Deny old versions of common crates
     { name = "openssl", version = "<0.10" },
