@@ -1,17 +1,17 @@
 use crate::metrics::{DEPLOYMENTS_WATCHED, RECONCILE_DURATION, RECONCILE_ERRORS};
-use crate::models::{annotations, ResourcePolicy, UpdatePolicy};
+use crate::models::{ResourcePolicy, UpdatePolicy, annotations};
 use crate::policy::PolicyEngine;
 use anyhow::Result;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
+    ResourceExt,
     api::{Api, Patch, PatchParams},
     client::Client,
     runtime::{
         controller::{Action, Controller},
         watcher::Config,
     },
-    ResourceExt,
 };
 use serde_json::json;
 use std::sync::Arc;

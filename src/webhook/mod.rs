@@ -1,6 +1,6 @@
 use crate::models::webhook::{DockerHubWebhook, ImagePushEvent, RegistryWebhook};
 use anyhow::Result;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tower_http::trace::TraceLayer;
@@ -58,19 +58,19 @@ async fn handle_registry_webhook(
     );
 
     for event in payload.events {
-        if event.action == "push" {
-            if let Some(tag) = event.target.tag {
-                let push_event = ImagePushEvent {
-                    registry: extract_registry(&event.target.repository),
-                    repository: event.target.repository.clone(),
-                    tag,
-                    digest: Some(event.target.digest),
-                };
+        if event.action == "push"
+            && let Some(tag) = event.target.tag
+        {
+            let push_event = ImagePushEvent {
+                registry: extract_registry(&event.target.repository),
+                repository: event.target.repository.clone(),
+                tag,
+                digest: Some(event.target.digest),
+            };
 
-                if let Err(e) = state.event_tx.send(push_event) {
-                    error!("Failed to send push event: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event");
-                }
+            if let Err(e) = state.event_tx.send(push_event) {
+                error!("Failed to send push event: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event");
             }
         }
     }
