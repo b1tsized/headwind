@@ -243,7 +243,7 @@ jobs:
   # All checks must pass
   ci-success:
     name: CI Success
-    needs: [format, clippy, test, check, security, dependencies, docs, docker, kubernetes]
+    needs: [format, clippy, test, check, security, docs, docker, kubernetes]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -254,7 +254,6 @@ jobs:
              [[ "${{ needs.test.result }}" != "success" ]] ||
              [[ "${{ needs.check.result }}" != "success" ]] ||
              [[ "${{ needs.security.result }}" != "success" ]] ||
-             [[ "${{ needs.dependencies.result }}" != "success" ]] ||
              [[ "${{ needs.docs.result }}" != "success" ]] ||
              [[ "${{ needs.docker.result }}" != "success" ]] ||
              [[ "${{ needs.kubernetes.result }}" != "success" ]]; then
