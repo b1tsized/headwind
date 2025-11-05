@@ -1,13 +1,16 @@
-use anyhow::Result;
 use crate::metrics::{DEPLOYMENTS_WATCHED, RECONCILE_DURATION, RECONCILE_ERRORS};
-use crate::models::{ResourcePolicy, UpdatePolicy, annotations};
+use crate::models::{annotations, ResourcePolicy, UpdatePolicy};
 use crate::policy::PolicyEngine;
+use anyhow::Result;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     api::{Api, Patch, PatchParams},
     client::Client,
-    runtime::{controller::{Action, Controller}, watcher::Config},
+    runtime::{
+        controller::{Action, Controller},
+        watcher::Config,
+    },
     ResourceExt,
 };
 use serde_json::json;
@@ -46,12 +49,16 @@ impl DeploymentController {
             .for_each(|res| async move {
                 match res {
                     Ok((obj_ref, _action)) => {
-                        info!("Reconciled deployment: {}/{}", obj_ref.namespace.as_deref().unwrap_or("default"), obj_ref.name);
-                    }
+                        info!(
+                            "Reconciled deployment: {}/{}",
+                            obj_ref.namespace.as_deref().unwrap_or("default"),
+                            obj_ref.name
+                        );
+                    },
                     Err(e) => {
                         error!("Reconciliation error: {}", e);
                         RECONCILE_ERRORS.inc();
-                    }
+                    },
                 }
             })
             .await;
@@ -66,7 +73,10 @@ struct ControllerContext {
 }
 
 #[instrument(skip(_ctx, deployment), fields(deployment = %deployment.name_any()))]
-async fn reconcile(deployment: Arc<Deployment>, _ctx: Arc<ControllerContext>) -> Result<Action, kube::Error> {
+async fn reconcile(
+    deployment: Arc<Deployment>,
+    _ctx: Arc<ControllerContext>,
+) -> Result<Action, kube::Error> {
     let _timer = RECONCILE_DURATION.start_timer();
 
     let name = deployment.name_any();
@@ -87,7 +97,7 @@ async fn reconcile(deployment: Arc<Deployment>, _ctx: Arc<ControllerContext>) ->
         None => {
             debug!("Deployment has no annotations, skipping");
             return Ok(Action::requeue(Duration::from_secs(300)));
-        }
+        },
     };
 
     // Parse the policy from annotations
@@ -115,7 +125,11 @@ async fn reconcile(deployment: Arc<Deployment>, _ctx: Arc<ControllerContext>) ->
     Ok(Action::requeue(Duration::from_secs(60)))
 }
 
-fn error_policy(_deployment: Arc<Deployment>, error: &kube::Error, _ctx: Arc<ControllerContext>) -> Action {
+fn error_policy(
+    _deployment: Arc<Deployment>,
+    error: &kube::Error,
+    _ctx: Arc<ControllerContext>,
+) -> Action {
     error!("Reconciliation failed: {}", error);
     RECONCILE_ERRORS.inc();
     Action::requeue(Duration::from_secs(60))
@@ -127,13 +141,14 @@ fn parse_policy_from_annotations(
     let mut policy = ResourcePolicy::default();
 
     if let Some(policy_str) = annotations.get(annotations::POLICY) {
-        policy.policy = policy_str.parse()
-            .map_err(|e| kube::Error::Api(kube::core::ErrorResponse {
+        policy.policy = policy_str.parse().map_err(|e| {
+            kube::Error::Api(kube::core::ErrorResponse {
                 status: "Error".to_string(),
                 message: format!("Failed to parse policy: {}", e),
                 reason: "InvalidPolicy".to_string(),
                 code: 400,
-            }))?;
+            })
+        })?;
     }
 
     if let Some(pattern) = annotations.get(annotations::PATTERN) {
@@ -188,17 +203,10 @@ pub async fn update_deployment_image(
     );
 
     deployments
-        .patch(
-            name,
-            &PatchParams::default(),
-            &Patch::Strategic(patch),
-        )
+        .patch(name, &PatchParams::default(), &Patch::Strategic(patch))
         .await?;
 
-    info!(
-        "Successfully updated deployment {}/{}",
-        namespace, name
-    );
+    info!("Successfully updated deployment {}/{}", namespace, name);
 
     Ok(())
 }
@@ -212,7 +220,10 @@ mod tests {
     fn test_parse_policy_from_annotations() {
         let mut annotations = BTreeMap::new();
         annotations.insert(annotations::POLICY.to_string(), "minor".to_string());
-        annotations.insert(annotations::REQUIRE_APPROVAL.to_string(), "false".to_string());
+        annotations.insert(
+            annotations::REQUIRE_APPROVAL.to_string(),
+            "false".to_string(),
+        );
         annotations.insert(annotations::IMAGES.to_string(), "nginx, redis".to_string());
 
         let policy = parse_policy_from_annotations(&annotations).unwrap();

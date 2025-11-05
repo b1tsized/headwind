@@ -21,7 +21,7 @@ pub struct PollingConfig {
 impl Default for PollingConfig {
     fn default() -> Self {
         Self {
-            interval: 300, // 5 minutes
+            interval: 300,  // 5 minutes
             enabled: false, // Disabled by default, webhooks preferred
         }
     }
@@ -39,10 +39,7 @@ pub struct RegistryPoller {
 }
 
 impl RegistryPoller {
-    pub fn new(
-        config: PollingConfig,
-        event_sender: crate::webhook::EventSender,
-    ) -> Self {
+    pub fn new(config: PollingConfig, event_sender: crate::webhook::EventSender) -> Self {
         Self {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -106,7 +103,7 @@ impl RegistryPoller {
             Err(e) => {
                 warn!("Failed to list tags for {}: {}", image, e);
                 return Ok(None);
-            }
+            },
         };
 
         if tags.is_empty() {
@@ -194,6 +191,9 @@ mod tests {
     fn test_extract_registry() {
         assert_eq!(extract_registry(""), "docker.io");
         assert_eq!(extract_registry("gcr.io"), "gcr.io");
-        assert_eq!(extract_registry("registry.example.com"), "registry.example.com");
+        assert_eq!(
+            extract_registry("registry.example.com"),
+            "registry.example.com"
+        );
     }
 }
