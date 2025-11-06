@@ -56,7 +56,12 @@ impl RegistryPoller {
         tokio::spawn(async move {
             if !self.config.enabled {
                 info!("Registry polling is disabled");
-                return;
+                // Keep the event sender alive by moving it into an infinite loop
+                // This prevents the webhook event channel from closing
+                let _sender = self.event_sender;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
             }
 
             loop {

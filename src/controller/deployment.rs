@@ -40,34 +40,56 @@ impl DeploymentController {
 
     pub async fn run(self) {
         info!("Deployment controller starting...");
-        let deployments: Api<Deployment> = Api::all(self.client.clone());
 
-        info!("Creating controller for deployments");
-        Controller::new(deployments, Config::default())
-            .run(
-                reconcile,
-                error_policy,
-                Arc::new(ControllerContext {
-                    client: self.client,
-                    policy_engine: self.policy_engine,
-                }),
-            )
-            .for_each(|res| async move {
-                match res {
-                    Ok((obj_ref, _action)) => {
-                        info!(
-                            "Reconciled deployment: {}/{}",
-                            obj_ref.namespace.as_deref().unwrap_or("default"),
-                            obj_ref.name
-                        );
-                    },
-                    Err(e) => {
-                        error!("Reconciliation error: {}", e);
-                        RECONCILE_ERRORS.inc();
-                    },
-                }
-            })
-            .await;
+        // Run the controller in a loop with exponential backoff
+        // This handles transient errors during startup or runtime
+        let mut backoff_seconds = 1;
+        const MAX_BACKOFF: u64 = 60;
+
+        loop {
+            let deployments: Api<Deployment> = Api::all(self.client.clone());
+
+            info!("Creating controller for deployments");
+
+            let result = Controller::new(deployments, Config::default())
+                .run(
+                    reconcile,
+                    error_policy,
+                    Arc::new(ControllerContext {
+                        client: self.client.clone(),
+                        policy_engine: self.policy_engine.clone(),
+                    }),
+                )
+                .for_each(|res| async move {
+                    match res {
+                        Ok((obj_ref, _action)) => {
+                            info!(
+                                "Reconciled deployment: {}/{}",
+                                obj_ref.namespace.as_deref().unwrap_or("default"),
+                                obj_ref.name
+                            );
+                        },
+                        Err(e) => {
+                            // Log reconciliation errors but continue processing
+                            error!("Reconciliation error: {}", e);
+                            RECONCILE_ERRORS.inc();
+                        },
+                    }
+                })
+                .await;
+
+            // If the controller stream ends, log it and restart after backoff
+            error!(
+                "Deployment controller stream ended, restarting in {}s...",
+                backoff_seconds
+            );
+            tokio::time::sleep(Duration::from_secs(backoff_seconds)).await;
+
+            // Exponential backoff up to MAX_BACKOFF seconds
+            backoff_seconds = (backoff_seconds * 2).min(MAX_BACKOFF);
+
+            debug!("Controller loop result: {:?}", result);
+        }
     }
 }
 
@@ -212,15 +234,20 @@ fn parse_image(image: &str) -> Result<(String, String), kube::Error> {
 
 /// Handle an available image update
 /// This is called when we detect a new image version is available
-#[allow(dead_code)]
-async fn handle_image_update(
-    ctx: Arc<ControllerContext>,
+pub async fn handle_image_update(
+    client: Client,
+    policy_engine: Arc<PolicyEngine>,
     deployment: &Deployment,
     policy: &ResourcePolicy,
     container_name: &str,
     current_image: &str,
     new_image: &str,
 ) -> Result<(), kube::Error> {
+    // Create a temporary context for this operation
+    let ctx = Arc::new(ControllerContext {
+        client,
+        policy_engine,
+    });
     let namespace = deployment.namespace().unwrap();
     let name = deployment.name_any();
 
