@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300),
     };
-    let poller = polling::RegistryPoller::new(polling_config, event_sender);
+    let poller = polling::RegistryPoller::new(polling_config, event_sender).await?;
     let polling_handle = poller.start().await;
 
     // Initialize approval API server
