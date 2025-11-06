@@ -49,4 +49,7 @@ oci-distribution = { version = "0.11", features = ["rustls-tls"] }
 prometheus = "0.14"
 lazy_static = "1.5"
 
+# Encoding
+base64 = "0.22"
+
 [dev-dependencies]
