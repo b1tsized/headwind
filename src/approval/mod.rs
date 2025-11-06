@@ -1,4 +1,6 @@
-use crate::models::update::{ApprovalRequest, UpdateRequest, UpdateStatus};
+use crate::controller::update_deployment_image;
+use crate::models::crd::{UpdatePhase, UpdateRequest, UpdateRequestStatus};
+use crate::models::update::ApprovalRequest;
 use anyhow::Result;
 use axum::{
     Json, Router,
@@ -7,30 +9,35 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use chrono::Utc;
+use k8s_openapi::api::apps::v1::Deployment;
+use kube::api::{Patch, PatchParams};
+use kube::{Api, Client};
+use serde_json::json;
 use tokio::task::JoinHandle;
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn};
-
-type UpdateStore = Arc<RwLock<HashMap<String, UpdateRequest>>>;
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 struct ApprovalState {
-    updates: UpdateStore,
+    client: Client,
 }
 
 pub async fn start_approval_server() -> Result<JoinHandle<()>> {
-    let state = ApprovalState {
-        updates: Arc::new(RwLock::new(HashMap::new())),
-    };
+    let client = Client::try_default().await?;
+    let state = ApprovalState { client };
 
     let app = Router::new()
         .route("/api/v1/updates", get(list_updates))
-        .route("/api/v1/updates/{id}", get(get_update))
-        .route("/api/v1/updates/{id}/approve", post(approve_update))
-        .route("/api/v1/updates/{id}/reject", post(reject_update))
+        .route("/api/v1/updates/{namespace}/{name}", get(get_update))
+        .route(
+            "/api/v1/updates/{namespace}/{name}/approve",
+            post(approve_update),
+        )
+        .route(
+            "/api/v1/updates/{namespace}/{name}/reject",
+            post(reject_update),
+        )
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -54,121 +61,278 @@ pub async fn start_approval_server() -> Result<JoinHandle<()>> {
 async fn list_updates(
     State(state): State<ApprovalState>,
 ) -> Result<Json<Vec<UpdateRequest>>, StatusCode> {
-    let updates = state.updates.read().await;
-    let list: Vec<UpdateRequest> = updates.values().cloned().collect();
-    Ok(Json(list))
+    // Query all UpdateRequest CRDs across all namespaces
+    let update_requests: Api<UpdateRequest> = Api::all(state.client);
+
+    match update_requests.list(&Default::default()).await {
+        Ok(list) => Ok(Json(list.items)),
+        Err(e) => {
+            error!("Failed to list UpdateRequests: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        },
+    }
 }
 
 async fn get_update(
     State(state): State<ApprovalState>,
-    Path(id): Path<String>,
+    Path((namespace, name)): Path<(String, String)>,
 ) -> Result<Json<UpdateRequest>, StatusCode> {
-    let updates = state.updates.read().await;
-    updates
-        .get(&id)
-        .cloned()
-        .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+    let update_requests: Api<UpdateRequest> = Api::namespaced(state.client, &namespace);
+
+    match update_requests.get(&name).await {
+        Ok(ur) => Ok(Json(ur)),
+        Err(e) => {
+            warn!("UpdateRequest {}/{} not found: {}", namespace, name, e);
+            Err(StatusCode::NOT_FOUND)
+        },
+    }
 }
 
 async fn approve_update(
     State(state): State<ApprovalState>,
-    Path(id): Path<String>,
+    Path((namespace, name)): Path<(String, String)>,
     Json(approval): Json<ApprovalRequest>,
 ) -> impl IntoResponse {
-    let mut updates = state.updates.write().await;
+    let update_requests: Api<UpdateRequest> = Api::namespaced(state.client.clone(), &namespace);
 
-    if let Some(update) = updates.get_mut(&id) {
-        if update.status == UpdateStatus::PendingApproval {
-            update.status = UpdateStatus::Approved;
-            info!(
-                "Update {} approved by {:?}",
-                id,
-                approval.approver.as_deref().unwrap_or("unknown")
+    // Get the UpdateRequest
+    let update_request = match update_requests.get(&name).await {
+        Ok(ur) => ur,
+        Err(e) => {
+            warn!("UpdateRequest {}/{} not found: {}", namespace, name, e);
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("UpdateRequest not found: {}", e)})),
             );
+        },
+    };
 
-            // TODO: Trigger the actual update in Kubernetes
-            // This will be connected to the controller module
-
-            return (StatusCode::OK, Json(update.clone()));
-        } else {
-            warn!("Update {} is not in pending state", id);
-            return (StatusCode::CONFLICT, Json(update.clone()));
-        }
+    // Check if already approved/rejected
+    if let Some(status) = &update_request.status
+        && status.phase != UpdatePhase::Pending
+    {
+        warn!(
+            "UpdateRequest {}/{} is not in pending state: {:?}",
+            namespace, name, status.phase
+        );
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": format!("UpdateRequest is in {:?} state, cannot approve", status.phase),
+                "current_phase": format!("{:?}", status.phase)
+            })),
+        );
     }
 
-    (
-        StatusCode::NOT_FOUND,
-        Json(UpdateRequest {
-            id: id.clone(),
-            namespace: String::new(),
-            resource_name: String::new(),
-            resource_kind: crate::models::update::ResourceKind::Deployment,
-            current_image: String::new(),
-            new_image: String::new(),
-            created_at: chrono::Utc::now(),
-            status: UpdateStatus::Failed {
-                reason: "Not found".to_string(),
-            },
-        }),
-    )
+    info!(
+        "Approving UpdateRequest {}/{} by {:?}",
+        namespace,
+        name,
+        approval.approver.as_deref().unwrap_or("unknown")
+    );
+
+    // Execute the update
+    let update_result = execute_update(&state.client, &update_request).await;
+
+    // Update the CRD status
+    let new_status = match update_result {
+        Ok(()) => {
+            info!("Successfully applied update {}/{}", namespace, name);
+            UpdateRequestStatus {
+                phase: UpdatePhase::Completed,
+                approved_by: approval.approver.clone(),
+                approved_at: Some(Utc::now()),
+                message: Some("Update applied successfully".to_string()),
+                last_updated: Some(Utc::now()),
+                ..Default::default()
+            }
+        },
+        Err(e) => {
+            error!("Failed to apply update {}/{}: {}", namespace, name, e);
+            UpdateRequestStatus {
+                phase: UpdatePhase::Failed,
+                approved_by: approval.approver.clone(),
+                approved_at: Some(Utc::now()),
+                message: Some(format!("Update failed: {}", e)),
+                last_updated: Some(Utc::now()),
+                ..Default::default()
+            }
+        },
+    };
+
+    // Patch the status
+    let status_patch = json!({
+        "apiVersion": "headwind.sh/v1alpha1",
+        "kind": "UpdateRequest",
+        "status": new_status
+    });
+
+    match update_requests
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(status_patch))
+        .await
+    {
+        Ok(updated_ur) => {
+            info!("Updated status for UpdateRequest {}/{}", namespace, name);
+            (StatusCode::OK, Json(json!(updated_ur)))
+        },
+        Err(e) => {
+            error!(
+                "Failed to update status for UpdateRequest {}/{}: {}",
+                namespace, name, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update status: {}", e)})),
+            )
+        },
+    }
 }
 
 async fn reject_update(
     State(state): State<ApprovalState>,
-    Path(id): Path<String>,
+    Path((namespace, name)): Path<(String, String)>,
     Json(approval): Json<ApprovalRequest>,
 ) -> impl IntoResponse {
-    let mut updates = state.updates.write().await;
+    let update_requests: Api<UpdateRequest> = Api::namespaced(state.client.clone(), &namespace);
 
-    if let Some(update) = updates.get_mut(&id) {
-        if update.status == UpdateStatus::PendingApproval {
-            update.status = UpdateStatus::Rejected;
-            info!(
-                "Update {} rejected by {:?}: {:?}",
-                id,
-                approval.approver.as_deref().unwrap_or("unknown"),
-                approval.reason
+    // Get the UpdateRequest
+    let update_request = match update_requests.get(&name).await {
+        Ok(ur) => ur,
+        Err(e) => {
+            warn!("UpdateRequest {}/{} not found: {}", namespace, name, e);
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("UpdateRequest not found: {}", e)})),
             );
+        },
+    };
 
-            return (StatusCode::OK, Json(update.clone()));
-        } else {
-            warn!("Update {} is not in pending state", id);
-            return (StatusCode::CONFLICT, Json(update.clone()));
-        }
+    // Check if already approved/rejected
+    if let Some(status) = &update_request.status
+        && status.phase != UpdatePhase::Pending
+    {
+        warn!(
+            "UpdateRequest {}/{} is not in pending state: {:?}",
+            namespace, name, status.phase
+        );
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": format!("UpdateRequest is in {:?} state, cannot reject", status.phase),
+                "current_phase": format!("{:?}", status.phase)
+            })),
+        );
     }
 
-    (
-        StatusCode::NOT_FOUND,
-        Json(UpdateRequest {
-            id: id.clone(),
-            namespace: String::new(),
-            resource_name: String::new(),
-            resource_kind: crate::models::update::ResourceKind::Deployment,
-            current_image: String::new(),
-            new_image: String::new(),
-            created_at: chrono::Utc::now(),
-            status: UpdateStatus::Failed {
-                reason: "Not found".to_string(),
-            },
-        }),
+    info!(
+        "Rejecting UpdateRequest {}/{} by {:?}: {:?}",
+        namespace,
+        name,
+        approval.approver.as_deref().unwrap_or("unknown"),
+        approval.reason
+    );
+
+    // Update the CRD status
+    let new_status = UpdateRequestStatus {
+        phase: UpdatePhase::Rejected,
+        rejected_by: approval.approver.clone(),
+        rejected_at: Some(Utc::now()),
+        message: approval
+            .reason
+            .clone()
+            .or(Some("Rejected by user".to_string())),
+        last_updated: Some(Utc::now()),
+        ..Default::default()
+    };
+
+    // Patch the status
+    let status_patch = json!({
+        "apiVersion": "headwind.sh/v1alpha1",
+        "kind": "UpdateRequest",
+        "status": new_status
+    });
+
+    match update_requests
+        .patch_status(&name, &PatchParams::default(), &Patch::Merge(status_patch))
+        .await
+    {
+        Ok(updated_ur) => {
+            info!("Updated status for UpdateRequest {}/{}", namespace, name);
+            (StatusCode::OK, Json(json!(updated_ur)))
+        },
+        Err(e) => {
+            error!(
+                "Failed to update status for UpdateRequest {}/{}: {}",
+                namespace, name, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update status: {}", e)})),
+            )
+        },
+    }
+}
+
+async fn execute_update(client: &Client, update_request: &UpdateRequest) -> Result<()> {
+    let spec = &update_request.spec;
+    let target = &spec.target_ref;
+
+    debug!(
+        "Executing update for {}/{} in namespace {}",
+        target.kind, target.name, target.namespace
+    );
+
+    // Currently only support Deployment updates
+    if target.kind != "Deployment" {
+        return Err(anyhow::anyhow!(
+            "Unsupported resource kind: {}. Only Deployment is currently supported.",
+            target.kind
+        ));
+    }
+
+    // Get the container name
+    let container_name = spec
+        .container_name
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Container name not specified in UpdateRequest"))?;
+
+    // Verify the deployment exists
+    let deployments: Api<Deployment> = Api::namespaced(client.clone(), &target.namespace);
+    let deployment = deployments.get(&target.name).await?;
+
+    // Verify the container exists in the deployment
+    let pod_spec = deployment
+        .spec
+        .as_ref()
+        .and_then(|s| s.template.spec.as_ref())
+        .ok_or_else(|| anyhow::anyhow!("Deployment has no pod spec"))?;
+
+    let container_exists = pod_spec
+        .containers
+        .iter()
+        .any(|c| c.name == *container_name);
+
+    if !container_exists {
+        return Err(anyhow::anyhow!(
+            "Container '{}' not found in deployment {}",
+            container_name,
+            target.name
+        ));
+    }
+
+    // Call the update function
+    update_deployment_image(
+        client.clone(),
+        &target.namespace,
+        &target.name,
+        container_name,
+        &spec.new_image,
     )
+    .await?;
+
+    Ok(())
 }
 
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
-}
-
-// Public API for other modules to create update requests
-#[allow(dead_code)]
-pub async fn create_update_request(store: UpdateStore, request: UpdateRequest) -> Result<()> {
-    let mut updates = store.write().await;
-    updates.insert(request.id.clone(), request);
-    Ok(())
-}
-
-// Public API to get the update store reference
-#[allow(dead_code)]
-pub fn get_update_store() -> UpdateStore {
-    Arc::new(RwLock::new(HashMap::new()))
 }
