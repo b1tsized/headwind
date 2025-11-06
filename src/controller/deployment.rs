@@ -1,5 +1,8 @@
 use crate::metrics::{DEPLOYMENTS_WATCHED, RECONCILE_DURATION, RECONCILE_ERRORS};
-use crate::models::{ResourcePolicy, UpdatePolicy, UpdateRequest, UpdateRequestSpec, TargetRef, UpdateType, UpdatePolicyType, annotations};
+use crate::models::{
+    ResourcePolicy, TargetRef, UpdatePolicy, UpdatePolicyType, UpdateRequest, UpdateRequestSpec,
+    UpdateType, annotations,
+};
 use crate::policy::PolicyEngine;
 use anyhow::Result;
 use chrono::Utc;
@@ -136,13 +139,17 @@ async fn reconcile(
     for container in containers {
         // Skip containers not in the tracked images list (if specified)
         if !policy.images.is_empty() && !policy.images.contains(&container.name) {
-            debug!("Skipping container {} (not in tracked images list)", container.name);
+            debug!(
+                "Skipping container {} (not in tracked images list)",
+                container.name
+            );
             continue;
         }
 
-        let current_image = container.image.as_ref().ok_or_else(|| {
-            create_error(&format!("Container {} has no image", container.name))
-        })?;
+        let current_image = container
+            .image
+            .as_ref()
+            .ok_or_else(|| create_error(&format!("Container {} has no image", container.name)))?;
 
         // Extract image name and tag
         let (image_name, current_tag) = parse_image(current_image)?;
@@ -520,12 +527,33 @@ mod tests {
 
     #[test]
     fn test_map_policy_to_crd() {
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::Major), UpdatePolicyType::Major);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::Minor), UpdatePolicyType::Minor);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::Patch), UpdatePolicyType::Patch);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::Glob), UpdatePolicyType::Glob);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::None), UpdatePolicyType::None);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::All), UpdatePolicyType::None);
-        assert_eq!(map_policy_to_crd(&UpdatePolicy::Force), UpdatePolicyType::None);
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::Major),
+            UpdatePolicyType::Major
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::Minor),
+            UpdatePolicyType::Minor
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::Patch),
+            UpdatePolicyType::Patch
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::Glob),
+            UpdatePolicyType::Glob
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::None),
+            UpdatePolicyType::None
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::All),
+            UpdatePolicyType::None
+        );
+        assert_eq!(
+            map_policy_to_crd(&UpdatePolicy::Force),
+            UpdatePolicyType::None
+        );
     }
 }
