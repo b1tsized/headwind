@@ -345,10 +345,10 @@ Headwind is currently in **beta** stage (v0.2.0-alpha). Core functionality is co
 - ✅ Kubernetes controller watches and updates Deployments
 - ✅ Minimum update interval respected
 - ✅ Deduplication to avoid update request spam
+- ✅ Private registry authentication (Docker Hub, ECR, GCR, ACR, Harbor, GHCR, GitLab)
 
 ### 🚧 In Progress
 - 🚧 Comprehensive integration tests (manual testing successful)
-- 🚧 Private registry authentication support (currently anonymous only)
 - 🚧 CI/CD pipeline enhancements
 
 ### 📋 Planned Features
@@ -496,7 +496,7 @@ spec:
 - [ ] CI/CD pipeline enhancements
 
 ### v0.3.0 - Extended Support (Medium Priority)
-- [ ] Private registry authentication
+- [x] Private registry authentication (completed)
 - [ ] Helm Release support
 - [ ] StatefulSet/DaemonSet support
 - [ ] Notification system (Slack, Teams, generic webhooks)
@@ -530,10 +530,14 @@ A: Yes! Headwind can update the image tags, and Flux/Argo will see the change an
 
 **Q: Does this work with private registries?**
 
-A: Yes, as long as:
-1. Your Kubernetes cluster can pull from the registry (imagePullSecrets configured)
-2. The registry can send webhooks to Headwind
-3. Webhook payloads are in supported format
+A: Yes! Headwind reads credentials from your Kubernetes `imagePullSecrets`. Supports:
+- Docker Hub (including Personal Access Tokens)
+- AWS ECR
+- Google GCR/Artifact Registry
+- Azure ACR
+- Harbor, GHCR, GitLab, and other registries
+
+Simply configure your ServiceAccount's imagePullSecrets as usual, and Headwind will use them automatically.
 
 **Q: What about rollbacks?**
 

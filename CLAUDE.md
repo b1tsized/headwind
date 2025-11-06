@@ -75,7 +75,7 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
 4. **Deduplication**: Tracks unique image+policy combinations to avoid redundant checks
 5. **Caching**: Maintains in-memory cache of last seen tag+digest per image
 
-**Note**: Currently uses anonymous registry access. Private registry authentication support is planned.
+**Private Registry Authentication**: ✅ Fully supported via Kubernetes imagePullSecrets. Reads credentials from ServiceAccount and uses them for registry API calls. Supports Docker Hub, ECR, GCR, ACR, Harbor, GHCR, and GitLab registries.
 
 #### 3. Policy Engine (`src/policy/mod.rs`)
 - **Purpose**: Determines if an update should happen based on semantic versioning
@@ -490,9 +490,9 @@ Default: Polling disabled, webhooks recommended
 
 ### High Priority (Next)
 1. Add integration tests with real cluster
-2. Private registry authentication support
-3. Comprehensive end-to-end testing
-4. CI/CD pipeline for automated testing
+2. Comprehensive end-to-end testing
+3. CI/CD pipeline for automated testing
+4. Wiki documentation (#36)
 
 ### Medium Priority
 1. Helm Release support
