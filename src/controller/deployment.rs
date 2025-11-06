@@ -3,6 +3,7 @@ use crate::models::{
     ResourcePolicy, TargetRef, UpdatePolicy, UpdatePolicyType, UpdateRequest, UpdateRequestSpec,
     UpdateType, annotations,
 };
+use crate::notifications::{self, DeploymentInfo};
 use crate::policy::PolicyEngine;
 use crate::rollback::RollbackManager;
 use anyhow::Result;
@@ -275,6 +276,16 @@ pub async fn handle_image_update(
         namespace, name, container_name, current_tag, new_tag
     );
 
+    // Send update detected notification
+    let deployment_info = DeploymentInfo {
+        name: name.clone(),
+        namespace: namespace.clone(),
+        current_image: current_image.to_string(),
+        new_image: new_image.to_string(),
+        container: Some(container_name.to_string()),
+    };
+    notifications::notify_update_detected(deployment_info);
+
     // Check if approval is required
     if policy.require_approval {
         // Create UpdateRequest CRD
@@ -365,6 +376,21 @@ async fn create_update_request(
     update_requests
         .create(&PostParams::default(), &update_request)
         .await?;
+
+    // Send notification about update request creation
+    let deployment_info = DeploymentInfo {
+        name: deployment_name.to_string(),
+        namespace: namespace.to_string(),
+        current_image: current_image.to_string(),
+        new_image: new_image.to_string(),
+        container: Some(container_name.to_string()),
+    };
+    notifications::notify_update_request_created(
+        deployment_info,
+        format!("{:?}", policy),
+        true, // require_approval is true in this flow
+        ur_name.clone(),
+    );
 
     Ok(())
 }

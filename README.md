@@ -10,6 +10,7 @@ Headwind monitors container registries and automatically updates your Kubernetes
 - **Semver Policy Engine**: Intelligent update decisions based on semantic versioning (patch, minor, major, glob, force, all)
 - **Approval Workflow**: Full HTTP API for approval requests with integration possibilities (Slack, webhooks, etc.)
 - **Rollback Support**: Manual rollback to previous versions with update history tracking and automatic rollback on failures
+- **Notifications**: Slack, Microsoft Teams, and generic webhook notifications for all deployment events
 - **Full Observability**: Prometheus metrics, distributed tracing, and structured logging
 - **Resource Support**:
   - Kubernetes Deployments ✅
@@ -310,6 +311,122 @@ kubectl get deployment my-app -o jsonpath='{.metadata.annotations.headwind\.sh/u
 
 Headwind keeps the last 10 updates per container.
 
+### Notifications
+
+Headwind can send notifications about deployment updates to Slack, Microsoft Teams, or generic webhooks.
+
+#### Configuration
+
+Configure notifications using environment variables in `deploy/k8s/deployment.yaml`:
+
+```yaml
+env:
+# Slack Configuration
+- name: SLACK_ENABLED
+  value: "true"
+- name: SLACK_WEBHOOK_URL
+  value: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+- name: SLACK_CHANNEL  # Optional: override webhook default
+  value: "#deployments"
+- name: SLACK_USERNAME  # Optional: customize bot name
+  value: "Headwind Bot"
+- name: SLACK_ICON_EMOJI  # Optional: customize bot icon
+  value: ":rocket:"
+
+# Microsoft Teams Configuration
+- name: TEAMS_ENABLED
+  value: "true"
+- name: TEAMS_WEBHOOK_URL
+  value: "https://outlook.office.com/webhook/YOUR-WEBHOOK-URL"
+
+# Generic Webhook Configuration
+- name: WEBHOOK_ENABLED
+  value: "true"
+- name: WEBHOOK_URL
+  value: "https://your-webhook-endpoint.com/notifications"
+- name: WEBHOOK_SECRET  # Optional: HMAC signature verification
+  value: "your-secret-key"
+- name: WEBHOOK_TIMEOUT  # Optional: timeout in seconds (default: 10)
+  value: "10"
+- name: WEBHOOK_MAX_RETRIES  # Optional: max retries (default: 3)
+  value: "3"
+```
+
+#### Notification Events
+
+Headwind sends notifications for the following events:
+
+- **UpdateRequestCreated**: New UpdateRequest CRD created (requires approval)
+- **UpdateApproved**: Update approved by user
+- **UpdateRejected**: Update rejected by user
+- **UpdateCompleted**: Update successfully applied
+- **UpdateFailed**: Update failed to apply
+- **RollbackTriggered**: Automatic rollback triggered due to health check failure
+- **RollbackCompleted**: Rollback completed successfully
+- **RollbackFailed**: Rollback failed
+
+#### Slack Integration
+
+Slack notifications use Block Kit for rich formatting with:
+- Color-coded messages by event type
+- Deployment details (namespace, name, images)
+- Interactive approval buttons (when approval URL is available)
+- Timestamp with relative time formatting
+
+#### Microsoft Teams Integration
+
+Teams notifications use Adaptive Cards with:
+- Color themes matching event severity
+- Structured fact display
+- Action buttons for approvals
+- Kubernetes logo branding
+
+#### Generic Webhook Format
+
+Generic webhooks receive JSON payloads with HMAC SHA256 signature verification:
+
+```json
+{
+  "event": "update_completed",
+  "timestamp": "2025-11-06T10:30:00Z",
+  "deployment": {
+    "name": "nginx",
+    "namespace": "production",
+    "currentImage": "nginx:1.25.0",
+    "newImage": "nginx:1.26.0",
+    "container": "nginx"
+  },
+  "policy": "minor",
+  "requiresApproval": true,
+  "updateRequestName": "nginx-update-1-26-0"
+}
+```
+
+Signature is sent in the `X-Headwind-Signature` header as `sha256=<hex>`.
+
+To verify:
+```python
+import hmac
+import hashlib
+
+def verify_signature(secret, payload, signature):
+    expected = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return f"sha256={expected}" == signature
+```
+
+#### Notification Metrics
+
+Monitor notification delivery with Prometheus metrics:
+- `headwind_notifications_sent_total` - Total notifications sent successfully
+- `headwind_notifications_failed_total` - Total notification failures
+- `headwind_notifications_slack_sent_total` - Notifications sent to Slack
+- `headwind_notifications_teams_sent_total` - Notifications sent to Teams
+- `headwind_notifications_webhook_sent_total` - Notifications sent via webhook
+
 ### Metrics (Port 9090)
 
 Prometheus metrics available at:
@@ -331,6 +448,15 @@ Available metrics:
 - `headwind_updates_failed_total` - Failed update attempts
 - `headwind_reconcile_duration_seconds` - Controller reconciliation time
 - `headwind_deployments_watched` - Number of watched Deployments
+- `headwind_rollbacks_total` - Total rollback operations performed
+- `headwind_rollbacks_manual_total` - Manual rollback operations
+- `headwind_rollbacks_automatic_total` - Automatic rollback operations
+- `headwind_rollbacks_failed_total` - Failed rollback operations
+- `headwind_notifications_sent_total` - Total notifications sent successfully
+- `headwind_notifications_failed_total` - Total notification failures
+- `headwind_notifications_slack_sent_total` - Notifications sent to Slack
+- `headwind_notifications_teams_sent_total` - Notifications sent to Teams
+- `headwind_notifications_webhook_sent_total` - Notifications sent via webhook
 
 ## Architecture
 
@@ -531,17 +657,16 @@ Headwind is currently in **beta** stage (v0.2.0-alpha). Core functionality is co
 - ✅ Private registry authentication (Docker Hub, ECR, GCR, ACR, Harbor, GHCR, GitLab)
 - ✅ Manual rollback functionality with update history tracking
 - ✅ Automatic rollback on deployment failures
+- ✅ Notification integrations (Slack, Teams, webhooks)
 
 ### 🚧 In Progress
 - 🚧 Comprehensive integration tests (70 tests passing, manual testing successful)
 - 🚧 CI/CD pipeline enhancements
-- 🚧 Rollback metrics and kubectl plugin
 
 ### 📋 Planned Features
 - StatefulSet and DaemonSet support
 - Helm Release support
 - Web UI for approvals
-- Notification integrations (Slack, Teams, webhooks)
 
 **Production readiness**: Core workflow is functional. Suitable for testing environments. For production use, we recommend waiting for comprehensive integration tests and private registry support.
 
@@ -686,9 +811,9 @@ spec:
 - [x] Automatic rollback on deployment failures (completed)
 - [x] Rollback metrics (completed)
 - [x] kubectl plugin for rollback and approvals (completed)
+- [x] Notification system (Slack, Teams, generic webhooks) (completed)
 - [ ] Helm Release support
 - [ ] StatefulSet/DaemonSet support
-- [ ] Notification system (Slack, Teams, generic webhooks)
 - [ ] Multi-architecture Docker images (arm64, amd64)
 
 ### v0.4.0 - Enhanced UX (Low Priority)

@@ -120,6 +120,32 @@ lazy_static! {
         "headwind_deployment_health_failures_total",
         "Total number of deployment health check failures detected"
     ).unwrap();
+
+    // Notification metrics
+    pub static ref NOTIFICATIONS_SENT_TOTAL: IntCounter = IntCounter::new(
+        "headwind_notifications_sent_total",
+        "Total number of notifications sent"
+    ).unwrap();
+
+    pub static ref NOTIFICATIONS_FAILED_TOTAL: IntCounter = IntCounter::new(
+        "headwind_notifications_failed_total",
+        "Total number of failed notification attempts"
+    ).unwrap();
+
+    pub static ref NOTIFICATIONS_SLACK_SENT: IntCounter = IntCounter::new(
+        "headwind_notifications_slack_sent_total",
+        "Total number of notifications sent to Slack"
+    ).unwrap();
+
+    pub static ref NOTIFICATIONS_TEAMS_SENT: IntCounter = IntCounter::new(
+        "headwind_notifications_teams_sent_total",
+        "Total number of notifications sent to Microsoft Teams"
+    ).unwrap();
+
+    pub static ref NOTIFICATIONS_WEBHOOK_SENT: IntCounter = IntCounter::new(
+        "headwind_notifications_webhook_sent_total",
+        "Total number of notifications sent via generic webhook"
+    ).unwrap();
 }
 
 pub fn register_metrics() {
@@ -165,6 +191,21 @@ pub fn register_metrics() {
         .ok();
     REGISTRY
         .register(Box::new(DEPLOYMENT_HEALTH_FAILURES.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(NOTIFICATIONS_SENT_TOTAL.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(NOTIFICATIONS_FAILED_TOTAL.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(NOTIFICATIONS_SLACK_SENT.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(NOTIFICATIONS_TEAMS_SENT.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(NOTIFICATIONS_WEBHOOK_SENT.clone()))
         .ok();
 
     info!("Metrics registered");

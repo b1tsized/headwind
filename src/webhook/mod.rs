@@ -213,7 +213,12 @@ async fn process_image_push_event(
             };
 
             // Check if this container uses the image from the webhook event
-            if !images_match(&event.registry, &event.repository, &image_name) {
+            let matches = images_match(&event.registry, &event.repository, &image_name);
+            debug!(
+                "Image match check: event=({}, {}) deployment={} => {}",
+                event.registry, event.repository, image_name, matches
+            );
+            if !matches {
                 continue;
             }
 
@@ -282,21 +287,102 @@ fn parse_image_full(image: &str) -> Result<(String, String)> {
 
 /// Check if two images match (handling registry prefixes)
 fn images_match(event_registry: &str, event_repository: &str, deployment_image: &str) -> bool {
-    // Build the full event image name
-    let event_image = if event_registry == "docker.io" {
-        event_repository.to_string()
+    use tracing::debug;
+
+    debug!(
+        "images_match: event_registry={}, event_repository={}, deployment_image={}",
+        event_registry, event_repository, deployment_image
+    );
+
+    // Strip tag/digest from deployment image to get just the image name
+    // We need to be careful: "registry.example.com:5000/image:tag" should become "registry.example.com:5000/image"
+    // Split by @ first for digests, then find the last : that's after a / for tags
+    let without_digest = deployment_image
+        .split('@')
+        .next()
+        .unwrap_or(deployment_image);
+    let deployment_image_name = if let Some(slash_pos) = without_digest.rfind('/') {
+        // If there's a slash, only consider colons after it for tag splitting
+        if let Some(colon_pos) = without_digest[slash_pos..].rfind(':') {
+            &without_digest[..slash_pos + colon_pos]
+        } else {
+            without_digest
+        }
+    } else if let Some(colon_pos) = without_digest.rfind(':') {
+        // No slash - check if this looks like a port (registry.example.com:5000) or a tag (nginx:1.27)
+        // If there's a dot before the colon, it's likely a port
+        if without_digest[..colon_pos].contains('.') {
+            without_digest // Keep the port
+        } else {
+            &without_digest[..colon_pos] // Strip the tag
+        }
     } else {
-        format!("{}/{}", event_registry, event_repository)
+        without_digest
     };
 
     // Normalize deployment image (remove docker.io prefix if present)
-    let normalized_deployment = if let Some(rest) = deployment_image.strip_prefix("docker.io/") {
+    let normalized_deployment = if let Some(rest) = deployment_image_name.strip_prefix("docker.io/")
+    {
         rest.to_string()
     } else {
-        deployment_image.to_string()
+        deployment_image_name.to_string()
     };
 
-    event_image == normalized_deployment || event_repository == normalized_deployment
+    // Build event image based on registry
+    let event_image = if event_registry == "docker.io" {
+        // Docker Hub with explicit registry
+        event_repository.to_string()
+    } else if event_registry == "library" {
+        // Docker Hub official images - registry is sent as "library"
+        // This should match deployment images like "nginx" or "library/nginx"
+        event_repository.to_string()
+    } else if !event_registry.contains('.') && !event_registry.contains(':') {
+        // Likely a Docker Hub user/org (no domain or port)
+        event_repository.to_string()
+    } else {
+        // External registry (contains . or :)
+        format!("{}/{}", event_registry, event_repository)
+    };
+
+    debug!("  deployment_image_name: {}", deployment_image_name);
+    debug!("  normalized_deployment: {}", normalized_deployment);
+    debug!("  event_image: {}", event_image);
+
+    // For Docker Hub official images, also check with library/ prefix
+    // This handles several cases:
+    // 1. registry="library" (Docker Hub webhook sends this for official images)
+    // 2. registry="docker.io", repository without "/" (e.g., "nginx")
+    // 3. registry="docker.io", repository="library/nginx" (explicit library namespace)
+    let is_library_image = event_registry == "library"
+        || (event_registry == "docker.io" && !event_repository.contains('/'))
+        || (event_registry == "docker.io" && event_repository.starts_with("library/"));
+
+    if is_library_image {
+        // Match both "nginx" and "library/nginx" in deployment
+        let deployment_without_library = normalized_deployment
+            .strip_prefix("library/")
+            .unwrap_or(&normalized_deployment);
+        let event_without_library = event_repository
+            .strip_prefix("library/")
+            .unwrap_or(event_repository);
+
+        debug!(
+            "  Library path comparison: {} == {} => {}",
+            event_without_library,
+            deployment_without_library,
+            event_without_library == deployment_without_library
+        );
+        event_without_library == deployment_without_library
+    } else {
+        // Standard comparison
+        debug!(
+            "  Standard comparison: {} == {} => {}",
+            event_image,
+            normalized_deployment,
+            event_image == normalized_deployment
+        );
+        event_image == normalized_deployment
+    }
 }
 
 /// Format image with registry and tag
@@ -431,6 +517,11 @@ mod tests {
             "registry.example.com:5000/myimage"
         ));
 
+        // Docker Hub official images with library namespace (the bug we're fixing)
+        assert!(images_match("library", "nginx", "nginx:1.27.0"));
+        assert!(images_match("library", "nginx", "nginx"));
+        assert!(images_match("library", "nginx", "library/nginx"));
+
         // Non-matching images
         assert!(!images_match("docker.io", "nginx", "redis"));
         assert!(!images_match(
@@ -438,7 +529,9 @@ mod tests {
             "project/image",
             "gcr.io/other/image"
         ));
-        assert!(!images_match("docker.io", "library/nginx", "nginx"));
+        // When registry is "docker.io" and repository is "library/nginx",
+        // it should match "nginx" (official image without explicit library prefix)
+        assert!(images_match("docker.io", "library/nginx", "nginx"));
     }
 
     #[test]
