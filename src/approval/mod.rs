@@ -1,6 +1,7 @@
 use crate::controller::update_deployment_image_with_tracking;
 use crate::models::crd::{UpdatePhase, UpdateRequest, UpdateRequestStatus};
 use crate::models::update::ApprovalRequest;
+use crate::notifications::{self, DeploymentInfo};
 use crate::rollback::{
     AutoRollbackConfig, HealthChecker, HealthStatus, RollbackManager, UpdateHistory,
 };
@@ -153,10 +154,30 @@ async fn approve_update(
     )
     .await;
 
+    // Build deployment info for notifications
+    let deployment_info = DeploymentInfo {
+        name: update_request.spec.target_ref.name.clone(),
+        namespace: update_request.spec.target_ref.namespace.clone(),
+        current_image: update_request.spec.current_image.clone(),
+        new_image: update_request.spec.new_image.clone(),
+        container: update_request.spec.container_name.clone(),
+    };
+
+    // Send approval notification
+    notifications::notify_update_approved(
+        deployment_info.clone(),
+        approval.approver.clone().unwrap_or_else(|| "unknown".to_string()),
+        name.clone(),
+    );
+
     // Update the CRD status
     let new_status = match update_result {
         Ok(()) => {
             info!("Successfully applied update {}/{}", namespace, name);
+
+            // Send completion notification
+            notifications::notify_update_completed(deployment_info.clone());
+
             UpdateRequestStatus {
                 phase: UpdatePhase::Completed,
                 approved_by: approval.approver.clone(),
@@ -168,6 +189,10 @@ async fn approve_update(
         },
         Err(e) => {
             error!("Failed to apply update {}/{}: {}", namespace, name, e);
+
+            // Send failure notification
+            notifications::notify_update_failed(deployment_info.clone(), e.to_string());
+
             UpdateRequestStatus {
                 phase: UpdatePhase::Failed,
                 approved_by: approval.approver.clone(),
@@ -249,6 +274,23 @@ async fn reject_update(
         name,
         approval.approver.as_deref().unwrap_or("unknown"),
         approval.reason
+    );
+
+    // Build deployment info for notifications
+    let deployment_info = DeploymentInfo {
+        name: update_request.spec.target_ref.name.clone(),
+        namespace: update_request.spec.target_ref.namespace.clone(),
+        current_image: update_request.spec.current_image.clone(),
+        new_image: update_request.spec.new_image.clone(),
+        container: update_request.spec.container_name.clone(),
+    };
+
+    // Send rejection notification
+    notifications::notify_update_rejected(
+        deployment_info,
+        approval.approver.clone().unwrap_or_else(|| "unknown".to_string()),
+        approval.reason.clone().unwrap_or_else(|| "No reason provided".to_string()),
+        name.clone(),
     );
 
     // Update the CRD status
@@ -404,6 +446,19 @@ async fn execute_update(
                         namespace, deployment_name, reason
                     );
 
+                    // Send rollback trigger notification
+                    let deployment_info = DeploymentInfo {
+                        name: deployment_name.clone(),
+                        namespace: namespace.clone(),
+                        current_image: new_image.clone(),
+                        new_image: current_image.clone().unwrap_or_default(),
+                        container: Some(container_name_clone.clone()),
+                    };
+                    notifications::notify_rollback_triggered(
+                        deployment_info.clone(),
+                        reason.clone(),
+                    );
+
                     // Attempt rollback
                     if let Some(rollback_image) = current_image {
                         match update_deployment_image_with_tracking(
@@ -422,11 +477,16 @@ async fn execute_update(
                                     "Successfully rolled back {}/{} from {} to {}",
                                     namespace, deployment_name, new_image, rollback_image
                                 );
+                                notifications::notify_rollback_completed(deployment_info.clone());
                             },
                             Err(e) => {
                                 error!(
                                     "Failed to rollback {}/{}: {}",
                                     namespace, deployment_name, e
+                                );
+                                notifications::notify_rollback_failed(
+                                    deployment_info.clone(),
+                                    e.to_string(),
                                 );
                             },
                         }
@@ -441,6 +501,19 @@ async fn execute_update(
                     error!(
                         "Automatic rollback triggered for {}/{}: Health check timeout",
                         namespace, deployment_name
+                    );
+
+                    // Send rollback trigger notification
+                    let deployment_info = DeploymentInfo {
+                        name: deployment_name.clone(),
+                        namespace: namespace.clone(),
+                        current_image: new_image.clone(),
+                        new_image: current_image.clone().unwrap_or_default(),
+                        container: Some(container_name_clone.clone()),
+                    };
+                    notifications::notify_rollback_triggered(
+                        deployment_info.clone(),
+                        "Health check timeout".to_string(),
                     );
 
                     // Attempt rollback
@@ -461,11 +534,16 @@ async fn execute_update(
                                     "Successfully rolled back {}/{} from {} to {} due to timeout",
                                     namespace, deployment_name, new_image, rollback_image
                                 );
+                                notifications::notify_rollback_completed(deployment_info.clone());
                             },
                             Err(e) => {
                                 error!(
                                     "Failed to rollback {}/{}: {}",
                                     namespace, deployment_name, e
+                                );
+                                notifications::notify_rollback_failed(
+                                    deployment_info.clone(),
+                                    e.to_string(),
                                 );
                             },
                         }

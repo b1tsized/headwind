@@ -7,6 +7,7 @@ pub mod approval;
 pub mod controller;
 pub mod metrics;
 pub mod models;
+pub mod notifications;
 pub mod policy;
 pub mod polling;
 pub mod rollback;

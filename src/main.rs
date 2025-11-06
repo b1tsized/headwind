@@ -1,5 +1,5 @@
 use anyhow::Result;
-use headwind::{approval, controller, metrics, polling, webhook};
+use headwind::{approval, controller, metrics, notifications, polling, webhook};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -14,6 +14,9 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting Headwind - Kubernetes Update Operator");
+
+    // Initialize notification manager
+    notifications::init_notifications();
 
     // Initialize metrics server
     let metrics_handle = metrics::start_metrics_server().await?;
