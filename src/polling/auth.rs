@@ -50,7 +50,11 @@ impl AuthManager {
 
     /// Get authentication for a specific image
     /// Returns RegistryAuth for use with OCI client
-    pub async fn get_auth_for_image(&mut self, image: &str, namespace: &str) -> Result<RegistryAuth> {
+    pub async fn get_auth_for_image(
+        &mut self,
+        image: &str,
+        namespace: &str,
+    ) -> Result<RegistryAuth> {
         // Extract registry from image
         let registry = extract_registry_from_image(image);
 
@@ -75,15 +79,15 @@ impl AuthManager {
                 self.credentials_cache.insert(registry.clone(), creds);
 
                 Ok(auth)
-            }
+            },
             Ok(None) => {
                 debug!("No credentials found for {}, using anonymous", registry);
                 Ok(RegistryAuth::Anonymous)
-            }
+            },
             Err(e) => {
                 warn!("Error fetching credentials for {}: {}", registry, e);
                 Ok(RegistryAuth::Anonymous)
-            }
+            },
         }
     }
 
@@ -100,7 +104,7 @@ impl AuthManager {
             Err(e) => {
                 debug!("Failed to get default service account: {}", e);
                 return Ok(None);
-            }
+            },
         };
 
         // Get imagePullSecrets from service account
@@ -109,7 +113,7 @@ impl AuthManager {
             None => {
                 debug!("No imagePullSecrets in service account");
                 return Ok(None);
-            }
+            },
         };
 
         // Try each secret
@@ -124,10 +128,10 @@ impl AuthManager {
                     if let Some(creds) = self.parse_secret(&secret, registry)? {
                         return Ok(Some(creds));
                     }
-                }
+                },
                 Err(e) => {
                     warn!("Failed to get secret {}: {}", secret_name, e);
-                }
+                },
             }
         }
 
@@ -156,9 +160,13 @@ impl AuthManager {
     }
 
     /// Parse .dockerconfigjson format
-    fn parse_dockerconfigjson(&self, data: &[u8], registry: &str) -> Result<Option<RegistryCredentials>> {
-        let config: DockerConfig = serde_json::from_slice(data)
-            .context("Failed to parse .dockerconfigjson")?;
+    fn parse_dockerconfigjson(
+        &self,
+        data: &[u8],
+        registry: &str,
+    ) -> Result<Option<RegistryCredentials>> {
+        let config: DockerConfig =
+            serde_json::from_slice(data).context("Failed to parse .dockerconfigjson")?;
 
         // Try exact registry match first
         if let Some(entry) = config.auths.get(registry) {
@@ -184,8 +192,8 @@ impl AuthManager {
     /// Parse legacy .dockercfg format
     fn parse_dockercfg(&self, data: &[u8], registry: &str) -> Result<Option<RegistryCredentials>> {
         // Legacy format is similar but without the "auths" wrapper
-        let auths: HashMap<String, DockerAuthEntry> = serde_json::from_slice(data)
-            .context("Failed to parse .dockercfg")?;
+        let auths: HashMap<String, DockerAuthEntry> =
+            serde_json::from_slice(data).context("Failed to parse .dockercfg")?;
 
         if let Some(entry) = auths.get(registry) {
             return self.parse_auth_entry(entry, registry);
@@ -195,7 +203,11 @@ impl AuthManager {
     }
 
     /// Parse an auth entry and extract credentials
-    fn parse_auth_entry(&self, entry: &DockerAuthEntry, registry: &str) -> Result<Option<RegistryCredentials>> {
+    fn parse_auth_entry(
+        &self,
+        entry: &DockerAuthEntry,
+        registry: &str,
+    ) -> Result<Option<RegistryCredentials>> {
         // If username and password are directly provided
         if !entry.username.is_empty() && !entry.password.is_empty() {
             return Ok(Some(RegistryCredentials {
@@ -211,8 +223,7 @@ impl AuthManager {
                 .decode(entry.auth.as_bytes())
                 .context("Failed to decode auth token")?;
 
-            let auth_str = String::from_utf8(decoded)
-                .context("Auth token is not valid UTF-8")?;
+            let auth_str = String::from_utf8(decoded).context("Auth token is not valid UTF-8")?;
 
             if let Some((username, password)) = auth_str.split_once(':') {
                 return Ok(Some(RegistryCredentials {
@@ -283,10 +294,22 @@ mod tests {
     fn test_extract_registry_from_image() {
         assert_eq!(extract_registry_from_image("nginx:1.21"), "docker.io");
         assert_eq!(extract_registry_from_image("nginx"), "docker.io");
-        assert_eq!(extract_registry_from_image("library/nginx:1.21"), "docker.io");
-        assert_eq!(extract_registry_from_image("gcr.io/project/image:tag"), "gcr.io");
-        assert_eq!(extract_registry_from_image("registry.example.com/repo/image"), "registry.example.com");
-        assert_eq!(extract_registry_from_image("localhost:5000/image"), "localhost:5000");
+        assert_eq!(
+            extract_registry_from_image("library/nginx:1.21"),
+            "docker.io"
+        );
+        assert_eq!(
+            extract_registry_from_image("gcr.io/project/image:tag"),
+            "gcr.io"
+        );
+        assert_eq!(
+            extract_registry_from_image("registry.example.com/repo/image"),
+            "registry.example.com"
+        );
+        assert_eq!(
+            extract_registry_from_image("localhost:5000/image"),
+            "localhost:5000"
+        );
     }
 
     #[test]
@@ -296,7 +319,10 @@ mod tests {
         assert!(registry_matches("index.docker.io", "docker.io"));
         assert!(registry_matches("registry-1.docker.io", "docker.io"));
         assert!(registry_matches("https://index.docker.io/v1/", "docker.io"));
-        assert!(registry_matches("https://registry-1.docker.io/v1/", "docker.io"));
+        assert!(registry_matches(
+            "https://registry-1.docker.io/v1/",
+            "docker.io"
+        ));
         assert!(registry_matches("gcr.io", "gcr.io"));
         assert!(registry_matches("https://gcr.io", "gcr.io"));
 
