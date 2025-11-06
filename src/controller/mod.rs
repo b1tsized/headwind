@@ -9,16 +9,32 @@ pub use deployment::{DeploymentController, handle_image_update};
 pub async fn start_controllers() -> Result<JoinHandle<()>> {
     info!("Starting Kubernetes controllers");
 
-    // Start deployment controller
-    let deployment_controller = DeploymentController::new().await?;
+    // Check if controllers should be disabled (useful for testing webhooks only)
+    let controllers_enabled = std::env::var("HEADWIND_CONTROLLERS_ENABLED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(true);
 
-    let handle = tokio::spawn(async move {
-        deployment_controller.run().await;
-        tracing::info!("Deployment controller stopped");
+    let handle = if controllers_enabled {
+        // Start deployment controller
+        let deployment_controller = DeploymentController::new().await?;
 
-        // TODO: Start Helm controller and join both
-        // tokio::join!(deployment_handle, helm_handle);
-    });
+        tokio::spawn(async move {
+            deployment_controller.run().await;
+            tracing::info!("Deployment controller stopped");
+
+            // TODO: Start Helm controller and join both
+            // tokio::join!(deployment_handle, helm_handle);
+        })
+    } else {
+        info!("Controllers disabled via HEADWIND_CONTROLLERS_ENABLED=false");
+        // Return a task that never completes
+        tokio::spawn(async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            }
+        })
+    };
 
     Ok(handle)
 }
