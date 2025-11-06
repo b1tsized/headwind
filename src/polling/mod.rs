@@ -1,6 +1,7 @@
 use crate::metrics::{POLLING_CYCLES_TOTAL, POLLING_IMAGES_CHECKED, POLLING_NEW_TAGS_FOUND};
-use crate::models::policy::{annotations, UpdatePolicy};
+use crate::models::policy::{annotations, ResourcePolicy, UpdatePolicy};
 use crate::models::webhook::ImagePushEvent;
+use crate::policy::PolicyEngine;
 use anyhow::Result;
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::{Api, Client};
@@ -297,17 +298,16 @@ impl RegistryPoller {
         let tag_response = match client.list_tags(reference, auth, None, None).await {
             Ok(resp) => resp,
             Err(e) => {
-                debug!("Failed to list tags for {}: {} (registry may not support listing)",
-                    reference.repository(), e);
+                debug!(
+                    "Failed to list tags for {}: {} (registry may not support listing)",
+                    reference.repository(),
+                    e
+                );
                 return Ok(None);
             },
         };
 
         let current_tag = reference.tag().unwrap_or("latest");
-
-        // TODO: Implement proper version comparison based on policy
-        // For now, just return None as this requires semver parsing and comparison logic
-        // This is a placeholder for future implementation
 
         debug!(
             "Found {} tags for {} (current: {}, policy: {:?})",
@@ -317,7 +317,77 @@ impl RegistryPoller {
             image_info.policy
         );
 
-        Ok(None)
+        // Build ResourcePolicy from image_info
+        let resource_policy = ResourcePolicy {
+            policy: image_info.policy,
+            pattern: image_info.pattern.clone(),
+            require_approval: true,
+            min_update_interval: None,
+            images: vec![],
+        };
+
+        let policy_engine = PolicyEngine;
+        let mut best_version: Option<String> = None;
+
+        // Find the best matching tag according to policy
+        for tag in &tag_response.tags {
+            // Skip non-version-looking tags for semver policies
+            if matches!(
+                image_info.policy,
+                UpdatePolicy::Patch | UpdatePolicy::Minor | UpdatePolicy::Major
+            ) {
+                // Quick sanity check: does it look like a version?
+                // Must start with digit or 'v'
+                if !tag.chars().next().is_some_and(|c| c.is_ascii_digit() || c == 'v') {
+                    debug!("Skipping non-version tag: {}", tag);
+                    continue;
+                }
+            }
+
+            // Check if this tag should be considered for update
+            match policy_engine.should_update(&resource_policy, current_tag, tag) {
+                Ok(true) => {
+                    debug!("Tag {} matches policy {:?}", tag, image_info.policy);
+
+                    // If we don't have a best version yet, or this one is better
+                    if best_version.is_none() {
+                        best_version = Some(tag.clone());
+                    } else if let Some(ref current_best) = best_version {
+                        // Check if new tag is better than current best
+                        match policy_engine.should_update(&resource_policy, current_best, tag) {
+                            Ok(true) => {
+                                debug!("Tag {} is better than current best {}", tag, current_best);
+                                best_version = Some(tag.clone());
+                            },
+                            Ok(false) => {
+                                debug!("Tag {} is not better than {}", tag, current_best);
+                            },
+                            Err(e) => {
+                                debug!("Failed to compare {} with {}: {}", tag, current_best, e);
+                            },
+                        }
+                    }
+                },
+                Ok(false) => {
+                    debug!("Tag {} does not match policy", tag);
+                },
+                Err(e) => {
+                    debug!("Failed to check if tag {} matches policy: {}", tag, e);
+                },
+            }
+        }
+
+        if let Some(ref best) = best_version {
+            info!(
+                "Best version found for {}: {} -> {} (policy: {:?})",
+                reference.repository(),
+                current_tag,
+                best,
+                image_info.policy
+            );
+        }
+
+        Ok(best_version)
     }
 
     /// Send an update event for a new image version
