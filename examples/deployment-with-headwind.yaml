@@ -25,11 +25,17 @@ spec:
       labels:
         app: nginx
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
       - name: nginx
         image: nginx:1.25.0
         ports:
         - containerPort: 80
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -50,11 +56,17 @@ spec:
       labels:
         app: redis
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
       - name: redis
         image: redis:7.2.0
         ports:
         - containerPort: 6379
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -76,8 +88,14 @@ spec:
       labels:
         app: my-app
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
       - name: app
         image: myregistry.com/my-app:v1.0.0-stable
         ports:
         - containerPort: 8080
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
