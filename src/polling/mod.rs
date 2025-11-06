@@ -1,3 +1,6 @@
+mod auth;
+
+use self::auth::AuthManager;
 use crate::metrics::{POLLING_CYCLES_TOTAL, POLLING_IMAGES_CHECKED, POLLING_NEW_TAGS_FOUND};
 use crate::models::policy::{ResourcePolicy, UpdatePolicy, annotations};
 use crate::models::webhook::ImagePushEvent;
@@ -39,6 +42,7 @@ pub(crate) struct ImageToTrack {
     policy: UpdatePolicy,
     #[allow(dead_code)] // Will be used for semver/glob matching in future
     pattern: Option<String>,
+    namespace: String,
 }
 
 /// Cache entry for tracking both tag and digest of an image
@@ -56,6 +60,7 @@ pub struct RegistryPoller {
     cache: ImageCache,
     event_sender: crate::webhook::EventSender,
     client: Client,
+    auth_manager: Arc<RwLock<AuthManager>>,
 }
 
 impl RegistryPoller {
@@ -64,11 +69,13 @@ impl RegistryPoller {
         event_sender: crate::webhook::EventSender,
     ) -> Result<Self> {
         let client = Client::try_default().await?;
+        let auth_manager = AuthManager::new(client.clone());
         Ok(Self {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             client,
+            auth_manager: Arc::new(RwLock::new(auth_manager)),
         })
     }
 
@@ -173,6 +180,10 @@ impl RegistryPoller {
                                 image: image.clone(),
                                 policy,
                                 pattern: pattern.clone(),
+                                namespace: metadata
+                                    .namespace
+                                    .clone()
+                                    .unwrap_or_else(|| "default".to_string()),
                             });
                         }
                     }
@@ -199,10 +210,16 @@ impl RegistryPoller {
 
         // Create OCI client
         let client = OciClient::new(Default::default());
-        let auth = &RegistryAuth::Anonymous;
+
+        // Get authentication for this image
+        let mut auth_manager = self.auth_manager.write().await;
+        let auth = auth_manager
+            .get_auth_for_image(&image_info.image, &image_info.namespace)
+            .await?;
+        drop(auth_manager);
 
         // Step 1: Check if the current tag's digest has changed
-        let current_digest = match client.fetch_manifest_digest(&reference, auth).await {
+        let current_digest = match client.fetch_manifest_digest(&reference, &auth).await {
             Ok(d) => d,
             Err(e) => {
                 warn!("Failed to fetch digest for {}: {}", image, e);
@@ -268,7 +285,7 @@ impl RegistryPoller {
         if image_info.policy != UpdatePolicy::None
             && image_info.policy != UpdatePolicy::Force
             && let Some(new_tag) = self
-                .check_for_new_tags(&client, &reference, image_info)
+                .check_for_new_tags(&client, &reference, &auth, image_info)
                 .await?
         {
             info!(
@@ -280,7 +297,7 @@ impl RegistryPoller {
             let new_ref_str = format!("{}:{}", reference.repository(), new_tag);
             let new_ref = Reference::try_from(new_ref_str.as_str())?;
 
-            if let Ok(new_digest) = client.fetch_manifest_digest(&new_ref, auth).await {
+            if let Ok(new_digest) = client.fetch_manifest_digest(&new_ref, &auth).await {
                 // Update cache to new tag
                 let mut cache = self.cache.write().await;
                 cache.insert(
@@ -307,10 +324,9 @@ impl RegistryPoller {
         &self,
         client: &OciClient,
         reference: &Reference,
+        auth: &RegistryAuth,
         image_info: &ImageToTrack,
     ) -> Result<Option<String>> {
-        let auth = &RegistryAuth::Anonymous;
-
         // List available tags
         let tag_response = match client.list_tags(reference, auth, None, None).await {
             Ok(resp) => resp,
