@@ -40,6 +40,11 @@ kind load docker-image headwind:latest  # or minikube image load headwind:latest
 # Apply all Kubernetes manifests
 kubectl apply -f deploy/k8s/namespace.yaml
 kubectl apply -f deploy/k8s/crds/updaterequest.yaml
+
+# Optional: Apply HelmRepository CRD if you want Helm chart auto-discovery
+# (Skip if you already have Flux CD installed)
+kubectl apply -f deploy/k8s/crds/helmrepository.yaml
+
 kubectl apply -f deploy/k8s/rbac.yaml
 kubectl apply -f deploy/k8s/deployment.yaml
 kubectl apply -f deploy/k8s/service.yaml
@@ -81,7 +86,68 @@ spec:
 
 ### Flux HelmRelease Support
 
-Headwind can monitor Flux HelmRelease resources and automatically update Helm chart versions based on semantic versioning policies.
+Headwind can monitor Flux HelmRelease resources and **automatically discover new Helm chart versions** from Helm repositories, updating based on semantic versioning policies.
+
+#### Prerequisites
+
+Headwind requires the HelmRepository CRD to query Helm repositories for available chart versions:
+
+**If you have Flux CD installed:** The CRD already exists - no action needed!
+
+**If you DON'T have Flux CD:** Apply the HelmRepository CRD:
+```bash
+kubectl apply -f deploy/k8s/crds/helmrepository.yaml
+```
+
+#### Setup
+
+Headwind supports both **traditional HTTP Helm repositories** and modern **OCI registries** (like ECR, GCR, ACR, Harbor, JFrog Artifactory, GitHub Container Registry, etc.).
+
+1. Create a HelmRepository resource pointing to your Helm repository:
+
+**HTTP Helm Repository:**
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: my-repo
+  namespace: default
+spec:
+  url: https://charts.example.com  # Traditional HTTP Helm repository
+  interval: 5m
+  type: default
+  # Optional: for private repositories
+  secretRef:
+    name: helm-repo-credentials  # Secret with username/password keys
+```
+
+**OCI Registry (ECR, GCR, ACR, Harbor, JFrog, GHCR, etc.):**
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: my-oci-repo
+  namespace: default
+spec:
+  url: oci://registry.example.com/helm-charts  # OCI registry URL
+  interval: 5m
+  type: oci
+  # Optional: for private registries
+  secretRef:
+    name: oci-registry-credentials  # Secret with username/password keys
+```
+
+**Note:** Headwind automatically detects whether to use HTTP or OCI based on the URL scheme (`https://` vs `oci://`).
+
+#### Known Limitations
+
+**OCI Registry Support**: Due to a limitation in the underlying `oci-distribution` Rust crate (v0.11), OCI Helm repositories may incorrectly query Docker Hub when the chart name matches a common Docker image name (e.g., `busybox`, `nginx`, `redis`, `postgres`). This results in discovering Docker container image tags instead of Helm chart versions.
+
+**Workaround**: Use traditional HTTP Helm repositories (fully supported) or ensure your OCI Helm chart names don't conflict with popular Docker Hub image names. This limitation is expected to be resolved in future crate updates.
+
+**Status**: HTTP Helm repositories work perfectly and are the recommended approach until this OCI limitation is addressed.
+
+2. Create a HelmRelease with Headwind annotations:
 
 ```yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -114,15 +180,36 @@ spec:
 
 **How it works:**
 1. Headwind watches all HelmRelease resources with `headwind.sh/policy` annotation
-2. Compares `spec.chart.spec.version` with `status.lastAttemptedRevision`
-3. When versions differ, uses the policy engine to validate the update
-4. Creates an UpdateRequest CRD if the update is approved by policy
-5. Sends notifications (Slack, Teams, webhooks) about the update
+2. **Automatically queries the referenced HelmRepository for available chart versions**
+3. Uses the PolicyEngine to find the best matching version based on your policy
+4. Compares discovered versions with `status.lastAttemptedRevision` or `spec.chart.spec.version`
+5. Creates an UpdateRequest CRD if a new version is approved by policy
+6. Sends notifications (Slack, Teams, webhooks) about the update
 
-**Limitations:**
-- Currently compares spec version vs deployed version only
-- Full Helm repository querying for new versions is not yet implemented
-- You must manually update the `spec.chart.spec.version` field to trigger Headwind
+**Configuration:**
+
+Automatic version discovery is enabled by default. To disable:
+```yaml
+# deploy/k8s/deployment.yaml
+env:
+- name: HEADWIND_HELM_AUTO_DISCOVERY
+  value: "false"
+```
+
+**Private Helm Repositories:**
+
+For private repositories requiring authentication, create a Secret:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: helm-repo-credentials
+  namespace: default
+type: Opaque
+stringData:
+  username: myusername
+  password: mypassword
+```
 
 **Metrics:**
 Helm-specific metrics are available at `/metrics`:
@@ -131,6 +218,10 @@ Helm-specific metrics are available at `/metrics`:
 - `headwind_helm_updates_found_total` - Updates discovered
 - `headwind_helm_updates_approved_total` - Updates approved by policy
 - `headwind_helm_updates_rejected_total` - Updates rejected by policy
+- `headwind_helm_updates_applied_total` - Updates successfully applied to HelmReleases
+- `headwind_helm_repository_queries_total` - Repository index queries performed
+- `headwind_helm_repository_errors_total` - Repository query errors
+- `headwind_helm_repository_query_duration_seconds` - Repository query duration
 
 ## Update Policies
 
@@ -507,6 +598,7 @@ Available metrics:
 - `headwind_helm_updates_found_total` - Helm chart updates discovered
 - `headwind_helm_updates_approved_total` - Helm chart updates approved by policy
 - `headwind_helm_updates_rejected_total` - Helm chart updates rejected by policy
+- `headwind_helm_updates_applied_total` - Helm chart updates successfully applied
 - `headwind_rollbacks_total` - Total rollback operations performed
 - `headwind_rollbacks_manual_total` - Manual rollback operations
 - `headwind_rollbacks_automatic_total` - Automatic rollback operations
@@ -874,8 +966,12 @@ spec:
 - [x] Rollback metrics (completed)
 - [x] kubectl plugin for rollback and approvals (completed)
 - [x] Notification system (Slack, Teams, generic webhooks) (completed)
-- [x] Flux HelmRelease support (completed - basic version monitoring)
-- [ ] Full Helm repository querying for automatic version discovery
+- [x] Flux HelmRelease support with automatic version discovery (completed)
+  - Automatic chart version discovery from HTTP and OCI registries
+  - UpdateRequest creation for chart updates
+  - Approval workflow integration
+  - Chart version patching on approval
+  - Full metrics and notification support
 - [ ] StatefulSet/DaemonSet support
 - [ ] Multi-architecture Docker images (arm64, amd64)
 
