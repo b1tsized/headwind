@@ -161,6 +161,7 @@ async fn approve_update(
         current_image: update_request.spec.current_image.clone(),
         new_image: update_request.spec.new_image.clone(),
         container: update_request.spec.container_name.clone(),
+        resource_kind: Some(update_request.spec.target_ref.kind.clone()),
     };
 
     // Send approval notification
@@ -286,6 +287,7 @@ async fn reject_update(
         current_image: update_request.spec.current_image.clone(),
         new_image: update_request.spec.new_image.clone(),
         container: update_request.spec.container_name.clone(),
+        resource_kind: Some(update_request.spec.target_ref.kind.clone()),
     };
 
     // Send rejection notification
@@ -462,6 +464,7 @@ async fn execute_update(
                         current_image: new_image.clone(),
                         new_image: current_image.clone().unwrap_or_default(),
                         container: Some(container_name_clone.clone()),
+                        resource_kind: None,
                     };
                     notifications::notify_rollback_triggered(
                         deployment_info.clone(),
@@ -519,6 +522,7 @@ async fn execute_update(
                         current_image: new_image.clone(),
                         new_image: current_image.clone().unwrap_or_default(),
                         container: Some(container_name_clone.clone()),
+                        resource_kind: None,
                     };
                     notifications::notify_rollback_triggered(
                         deployment_info.clone(),

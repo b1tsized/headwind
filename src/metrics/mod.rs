@@ -90,6 +90,27 @@ lazy_static! {
         "Total number of new tags discovered via polling"
     ).unwrap();
 
+    // Helm metrics
+    pub static ref HELM_CHART_VERSIONS_CHECKED: IntCounter = IntCounter::new(
+        "headwind_helm_chart_versions_checked_total",
+        "Total number of Helm chart version checks performed"
+    ).unwrap();
+
+    pub static ref HELM_UPDATES_FOUND: IntCounter = IntCounter::new(
+        "headwind_helm_updates_found_total",
+        "Total number of Helm chart updates discovered"
+    ).unwrap();
+
+    pub static ref HELM_UPDATES_APPROVED: IntCounter = IntCounter::new(
+        "headwind_helm_updates_approved_total",
+        "Total number of Helm chart updates approved by policy"
+    ).unwrap();
+
+    pub static ref HELM_UPDATES_REJECTED: IntCounter = IntCounter::new(
+        "headwind_helm_updates_rejected_total",
+        "Total number of Helm chart updates rejected by policy"
+    ).unwrap();
+
     // Rollback metrics
     pub static ref ROLLBACKS_TOTAL: IntCounter = IntCounter::new(
         "headwind_rollbacks_total",
@@ -185,6 +206,16 @@ pub fn register_metrics() {
         .ok();
     REGISTRY
         .register(Box::new(POLLING_NEW_TAGS_FOUND.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(HELM_CHART_VERSIONS_CHECKED.clone()))
+        .ok();
+    REGISTRY.register(Box::new(HELM_UPDATES_FOUND.clone())).ok();
+    REGISTRY
+        .register(Box::new(HELM_UPDATES_APPROVED.clone()))
+        .ok();
+    REGISTRY
+        .register(Box::new(HELM_UPDATES_REJECTED.clone()))
         .ok();
     REGISTRY.register(Box::new(ROLLBACKS_TOTAL.clone())).ok();
     REGISTRY.register(Box::new(ROLLBACKS_MANUAL.clone())).ok();

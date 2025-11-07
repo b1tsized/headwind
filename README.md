@@ -14,7 +14,7 @@ Headwind monitors container registries and automatically updates your Kubernetes
 - **Full Observability**: Prometheus metrics, distributed tracing, and structured logging
 - **Resource Support**:
   - Kubernetes Deployments ✅
-  - Helm Charts (planned)
+  - Flux HelmReleases ✅
   - StatefulSets (planned)
   - DaemonSets (planned)
 - **Lightweight**: Single binary, no database required
@@ -78,6 +78,59 @@ metadata:
 spec:
   # ... rest of deployment spec
 ```
+
+### Flux HelmRelease Support
+
+Headwind can monitor Flux HelmRelease resources and automatically update Helm chart versions based on semantic versioning policies.
+
+```yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: my-app
+  namespace: default
+  annotations:
+    # Update policy: none, patch, minor, major, glob, force, all
+    headwind.sh/policy: "minor"
+
+    # Require approval before updating (default: true)
+    headwind.sh/require-approval: "true"
+
+    # Minimum time between updates in seconds (default: 300)
+    headwind.sh/min-update-interval: "300"
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: my-app
+      version: "1.2.3"  # Headwind monitors this version
+      sourceRef:
+        kind: HelmRepository
+        name: my-repo
+        namespace: default
+  values:
+    # ... your values
+```
+
+**How it works:**
+1. Headwind watches all HelmRelease resources with `headwind.sh/policy` annotation
+2. Compares `spec.chart.spec.version` with `status.lastAttemptedRevision`
+3. When versions differ, uses the policy engine to validate the update
+4. Creates an UpdateRequest CRD if the update is approved by policy
+5. Sends notifications (Slack, Teams, webhooks) about the update
+
+**Limitations:**
+- Currently compares spec version vs deployed version only
+- Full Helm repository querying for new versions is not yet implemented
+- You must manually update the `spec.chart.spec.version` field to trigger Headwind
+
+**Metrics:**
+Helm-specific metrics are available at `/metrics`:
+- `headwind_helm_releases_watched` - Number of HelmReleases being monitored
+- `headwind_helm_chart_versions_checked_total` - Version checks performed
+- `headwind_helm_updates_found_total` - Updates discovered
+- `headwind_helm_updates_approved_total` - Updates approved by policy
+- `headwind_helm_updates_rejected_total` - Updates rejected by policy
 
 ## Update Policies
 
@@ -449,6 +502,11 @@ Available metrics:
 - `headwind_updates_skipped_interval_total` - Updates skipped due to minimum interval not elapsed
 - `headwind_reconcile_duration_seconds` - Controller reconciliation time
 - `headwind_deployments_watched` - Number of watched Deployments
+- `headwind_helm_releases_watched` - Number of watched HelmReleases
+- `headwind_helm_chart_versions_checked_total` - Helm chart version checks performed
+- `headwind_helm_updates_found_total` - Helm chart updates discovered
+- `headwind_helm_updates_approved_total` - Helm chart updates approved by policy
+- `headwind_helm_updates_rejected_total` - Helm chart updates rejected by policy
 - `headwind_rollbacks_total` - Total rollback operations performed
 - `headwind_rollbacks_manual_total` - Manual rollback operations
 - `headwind_rollbacks_automatic_total` - Automatic rollback operations
@@ -655,6 +713,7 @@ Headwind is currently in **beta** stage (v0.2.0-alpha). Core functionality is co
 - ✅ Policy engine works and is well-tested
 - ✅ All servers operational (webhook:8080, API:8081, metrics:9090)
 - ✅ Kubernetes controller watches and updates Deployments
+- ✅ Flux HelmRelease support with version monitoring
 - ✅ Minimum update interval respected
 - ✅ Deduplication to avoid update request spam
 - ✅ Private registry authentication (Docker Hub, ECR, GCR, ACR, Harbor, GHCR, GitLab)
@@ -668,7 +727,7 @@ Headwind is currently in **beta** stage (v0.2.0-alpha). Core functionality is co
 
 ### 📋 Planned Features
 - StatefulSet and DaemonSet support
-- Helm Release support
+- Full Helm repository querying for automatic version discovery
 - Web UI for approvals
 
 **Production readiness**: Core workflow is functional. Suitable for testing environments. For production use, we recommend waiting for comprehensive integration tests and private registry support.
@@ -815,7 +874,8 @@ spec:
 - [x] Rollback metrics (completed)
 - [x] kubectl plugin for rollback and approvals (completed)
 - [x] Notification system (Slack, Teams, generic webhooks) (completed)
-- [ ] Helm Release support
+- [x] Flux HelmRelease support (completed - basic version monitoring)
+- [ ] Full Helm repository querying for automatic version discovery
 - [ ] StatefulSet/DaemonSet support
 - [ ] Multi-architecture Docker images (arm64, amd64)
 
