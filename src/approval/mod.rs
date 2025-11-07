@@ -1,4 +1,7 @@
-use crate::controller::update_deployment_image_with_tracking;
+use crate::controller::{
+    update_daemonset_image_with_tracking, update_deployment_image_with_tracking,
+    update_statefulset_image_with_tracking,
+};
 use crate::models::crd::{UpdatePhase, UpdateRequest, UpdateRequestStatus};
 use crate::models::update::ApprovalRequest;
 use crate::notifications::{self, DeploymentInfo};
@@ -372,12 +375,19 @@ async fn execute_update(
             )
             .await
         },
+        "StatefulSet" => {
+            execute_statefulset_update(client, update_request, update_request_name, approved_by)
+                .await
+        },
+        "DaemonSet" => {
+            execute_daemonset_update(client, update_request, update_request_name, approved_by).await
+        },
         "HelmRelease" => {
             execute_helmrelease_update(client, update_request, update_request_name, approved_by)
                 .await
         },
         _ => Err(anyhow::anyhow!(
-            "Unsupported resource kind: {}. Only Deployment and HelmRelease are supported.",
+            "Unsupported resource kind: {}. Only Deployment, StatefulSet, DaemonSet, and HelmRelease are supported.",
             target.kind
         )),
     }
@@ -458,6 +468,7 @@ async fn execute_deployment_update(
         let namespace = target.namespace.clone();
         let container_name_clone = container_name.clone();
         let new_image = spec.new_image.clone();
+        let current_image_clone = current_image.clone();
 
         tokio::spawn(async move {
             info!(
@@ -487,7 +498,7 @@ async fn execute_deployment_update(
                         name: deployment_name.clone(),
                         namespace: namespace.clone(),
                         current_image: new_image.clone(),
-                        new_image: current_image.clone().unwrap_or_default(),
+                        new_image: current_image_clone.clone().unwrap_or_default(),
                         container: Some(container_name_clone.clone()),
                         resource_kind: None,
                     };
@@ -497,13 +508,13 @@ async fn execute_deployment_update(
                     );
 
                     // Attempt rollback
-                    if let Some(rollback_image) = current_image {
+                    if let Some(rollback_image) = current_image_clone.as_ref() {
                         match update_deployment_image_with_tracking(
                             client_clone,
                             &namespace,
                             &deployment_name,
                             &container_name_clone,
-                            &rollback_image,
+                            rollback_image,
                             None,
                             Some("headwind-auto-rollback".to_string()),
                         )
@@ -545,7 +556,7 @@ async fn execute_deployment_update(
                         name: deployment_name.clone(),
                         namespace: namespace.clone(),
                         current_image: new_image.clone(),
-                        new_image: current_image.clone().unwrap_or_default(),
+                        new_image: current_image_clone.clone().unwrap_or_default(),
                         container: Some(container_name_clone.clone()),
                         resource_kind: None,
                     };
@@ -555,13 +566,13 @@ async fn execute_deployment_update(
                     );
 
                     // Attempt rollback
-                    if let Some(rollback_image) = current_image {
+                    if let Some(rollback_image) = current_image_clone.as_ref() {
                         match update_deployment_image_with_tracking(
                             client_clone,
                             &namespace,
                             &deployment_name,
                             &container_name_clone,
-                            &rollback_image,
+                            rollback_image,
                             None,
                             Some("headwind-auto-rollback".to_string()),
                         )
@@ -689,6 +700,114 @@ async fn execute_helmrelease_update(
 
     // Increment metrics
     crate::metrics::HELM_UPDATES_APPLIED.inc();
+
+    Ok(())
+}
+
+async fn execute_statefulset_update(
+    client: &Client,
+    update_request: &UpdateRequest,
+    _update_request_name: Option<String>,
+    approved_by: Option<String>,
+) -> Result<()> {
+    let spec = &update_request.spec;
+    let target = &spec.target_ref;
+
+    info!(
+        "Executing StatefulSet update for {}/{} in namespace {}",
+        target.kind, target.name, target.namespace
+    );
+
+    // Apply the update using the statefulset controller function
+    update_statefulset_image_with_tracking(
+        client,
+        &target.namespace,
+        &target.name,
+        spec.current_image
+            .rsplit_once(':')
+            .map(|(image, _)| image)
+            .unwrap_or(&spec.current_image),
+        spec.new_image
+            .rsplit_once(':')
+            .map(|(_, version)| version)
+            .unwrap_or(&spec.new_image),
+        approved_by.as_deref(),
+    )
+    .await?;
+
+    info!(
+        "Successfully updated StatefulSet {}/{} to version {}",
+        target.namespace, target.name, spec.new_image
+    );
+
+    // Send success notification
+    let deployment_info = crate::notifications::DeploymentInfo {
+        name: target.name.clone(),
+        namespace: target.namespace.clone(),
+        current_image: spec.current_image.clone(),
+        new_image: spec.new_image.clone(),
+        container: spec.container_name.clone(),
+        resource_kind: Some("StatefulSet".to_string()),
+    };
+
+    crate::notifications::notify_update_completed(deployment_info);
+
+    // Increment metrics
+    crate::metrics::UPDATES_APPLIED.inc();
+
+    Ok(())
+}
+
+async fn execute_daemonset_update(
+    client: &Client,
+    update_request: &UpdateRequest,
+    _update_request_name: Option<String>,
+    approved_by: Option<String>,
+) -> Result<()> {
+    let spec = &update_request.spec;
+    let target = &spec.target_ref;
+
+    info!(
+        "Executing DaemonSet update for {}/{} in namespace {}",
+        target.kind, target.name, target.namespace
+    );
+
+    // Apply the update using the daemonset controller function
+    update_daemonset_image_with_tracking(
+        client,
+        &target.namespace,
+        &target.name,
+        spec.current_image
+            .rsplit_once(':')
+            .map(|(image, _)| image)
+            .unwrap_or(&spec.current_image),
+        spec.new_image
+            .rsplit_once(':')
+            .map(|(_, version)| version)
+            .unwrap_or(&spec.new_image),
+        approved_by.as_deref(),
+    )
+    .await?;
+
+    info!(
+        "Successfully updated DaemonSet {}/{} to version {}",
+        target.namespace, target.name, spec.new_image
+    );
+
+    // Send success notification
+    let deployment_info = crate::notifications::DeploymentInfo {
+        name: target.name.clone(),
+        namespace: target.namespace.clone(),
+        current_image: spec.current_image.clone(),
+        new_image: spec.new_image.clone(),
+        container: spec.container_name.clone(),
+        resource_kind: Some("DaemonSet".to_string()),
+    };
+
+    crate::notifications::notify_update_completed(deployment_info);
+
+    // Increment metrics
+    crate::metrics::UPDATES_APPLIED.inc();
 
     Ok(())
 }

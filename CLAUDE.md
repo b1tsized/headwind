@@ -123,7 +123,10 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
   - `approve_update()` - Approves request, executes update, updates CRD status
   - `reject_update()` - Rejects request with reason, updates CRD status
 
-#### 5. Kubernetes Controller (`src/controller/deployment.rs`)
+#### 5. Kubernetes Controllers (`src/controller/`)
+Headwind includes dedicated controllers for different Kubernetes workload types:
+
+##### Deployment Controller (`src/controller/deployment.rs`)
 - **Purpose**: Watches Deployments, processes image update events, and creates UpdateRequests
 - **Key Functions**:
   - `reconcile()` - Main reconciliation loop for Deployment changes
@@ -133,8 +136,40 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
   - `handle_image_event()` - Matches events to Deployments and creates UpdateRequests
   - `find_matching_deployments()` - Queries Deployments that use specific image
   - `extract_images_from_deployment()` - Gets all container images from Deployment
-- **Annotations Used**:
-  - `headwind.sh/policy` - Update policy
+
+**Status**: ✅ **FULLY FUNCTIONAL** - Complete end-to-end workflow operational
+
+##### StatefulSet Controller (`src/controller/statefulset.rs`)
+- **Purpose**: Watches StatefulSets for stateful applications requiring persistent storage and stable network identity
+- **Key Functions**:
+  - `reconcile()` - Main reconciliation loop for StatefulSet changes
+  - `parse_policy_from_annotations()` - Reads Headwind annotations from StatefulSet
+  - `update_statefulset_image()` - Updates container image in StatefulSet spec
+  - `update_statefulset_image_with_tracking()` - Updates with approval tracking
+  - `extract_images_from_statefulset()` - Gets all container images from StatefulSet
+- **Metrics**:
+  - `STATEFULSETS_WATCHED` - Gauge of StatefulSets being monitored
+- **Tests**: 4 unit tests covering image parsing, policy parsing, and glob matching
+
+**Status**: ✅ **FULLY FUNCTIONAL** - Complete StatefulSet update workflow operational
+
+##### DaemonSet Controller (`src/controller/daemonset.rs`)
+- **Purpose**: Watches DaemonSets for per-node applications (logging, monitoring, network agents)
+- **Key Functions**:
+  - `reconcile()` - Main reconciliation loop for DaemonSet changes
+  - `parse_policy_from_annotations()` - Reads Headwind annotations from DaemonSet
+  - `update_daemonset_image()` - Updates container image in DaemonSet spec
+  - `update_daemonset_image_with_tracking()` - Updates with approval tracking
+  - `extract_images_from_daemonset()` - Gets all container images from DaemonSet
+- **Metrics**:
+  - `DAEMONSETS_WATCHED` - Gauge of DaemonSets being monitored
+- **Tests**: 4 unit tests covering image parsing, policy parsing, and glob matching
+
+**Status**: ✅ **FULLY FUNCTIONAL** - Complete DaemonSet update workflow operational
+
+##### Common Annotations (All Controllers)
+All workload controllers support the same set of Headwind annotations:
+  - `headwind.sh/policy` - Update policy (patch, minor, major, all, glob, force, none)
   - `headwind.sh/pattern` - Glob pattern (for glob policy)
   - `headwind.sh/require-approval` - Boolean, default true
   - `headwind.sh/min-update-interval` - Minimum seconds between updates (default: 300)
@@ -144,17 +179,23 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
   - `headwind.sh/rollback-timeout` - Health check monitoring duration
   - `headwind.sh/health-check-retries` - Failed health checks before rollback
 
-**Current State**:
-- ✅ Watches all Deployments
-- ✅ Parses annotations and builds ResourcePolicy
-- ✅ Processes webhook and polling events
-- ✅ Creates UpdateRequest CRDs for approval workflow
-- ✅ Directly applies updates when approval not required
-- ✅ Respects minimum update interval
-- ✅ Handles both namespaced and all-namespace queries
-- ✅ Deduplicates UpdateRequests to avoid spam
+**Implementation Pattern**: Each controller follows the same architecture:
+- Watches resources using kube-rs Controller runtime
+- Parses annotations to build ResourcePolicy
+- Creates UpdateRequest CRDs for approval workflow
+- Directly applies updates when approval not required
+- Respects minimum update interval
+- Updates metrics and sends notifications
 
-**Status**: ✅ **FULLY FUNCTIONAL** - Complete end-to-end workflow operational
+**Current State**:
+- ✅ All three controllers watch their respective resources
+- ✅ Parse annotations and build ResourcePolicy
+- ✅ Process webhook and polling events
+- ✅ Create UpdateRequest CRDs for approval workflow
+- ✅ Apply updates directly when approval not required
+- ✅ Respect minimum update interval
+- ✅ Handle both namespaced and all-namespace queries
+- ✅ Deduplicate UpdateRequests to avoid spam
 
 #### 6. Helm Controller (`src/controller/helm.rs`)
 - **Purpose**: Watches Flux HelmRelease CRDs, automatically discovers new chart versions, and manages chart updates
@@ -219,6 +260,8 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
   - `headwind_reconcile_duration_seconds` - Histogram
   - `headwind_reconcile_errors_total` - Counter
   - `headwind_deployments_watched` - Gauge
+  - `headwind_statefulsets_watched` - Gauge
+  - `headwind_daemonsets_watched` - Gauge
   - `headwind_helm_releases_watched` - Gauge
   - `headwind_helm_chart_versions_checked_total` - Counter
   - `headwind_helm_updates_found_total` - Counter
@@ -341,7 +384,7 @@ The operator will:
 1. Start metrics server on :9090
 2. Start webhook server on :8080
 3. Start approval API on :8081
-4. Begin watching Deployments
+4. Begin watching Deployments, StatefulSets, DaemonSets, and HelmReleases
 
 ### Testing
 
@@ -392,14 +435,35 @@ The pre-commit hooks will automatically run:
 - Secret detection
 - Trailing whitespace removal
 
+### MANDATORY: Test All Changes Before Committing
+
+**CRITICAL IMPERATIVE FOR AI ASSISTANTS**:
+
+Before committing ANY code changes, you MUST:
+
+1. ✅ **Test manually in the local Kubernetes cluster**: Every code change affecting runtime behavior MUST be tested end-to-end with the actual cluster, not just unit tests
+2. ✅ **Run all unit tests**: `cargo test` - All tests must pass
+3. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings` - Zero warnings allowed
+4. ✅ **Format code**: `cargo fmt --all` - Consistent formatting required
+5. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
+
+**Testing Guidelines**:
+- For webhook changes: Send test webhook payloads and verify processing
+- For controller changes: Deploy test resources and verify reconciliation
+- For approval changes: Test approval/rejection workflows via API
+- For polling changes: Enable polling and verify detection
+- For notification changes: Verify Slack/webhook notifications are sent
+
+**DO NOT** commit code that has only been verified to compile and pass unit tests. Real integration testing in the cluster is mandatory.
+
 ### Before Creating a Pull Request
 
 **CRITICAL CHECKLIST**:
 
-1. ✅ **Run all tests**: `cargo test`
-2. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings`
-3. ✅ **Format code**: `cargo fmt --all`
-4. ✅ **Test manually**: If possible, test changes in a real Kubernetes cluster
+1. ✅ **Test manually**: MANDATORY - Test all changes in the local Kubernetes cluster
+2. ✅ **Run all tests**: `cargo test`
+3. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings`
+4. ✅ **Format code**: `cargo fmt --all`
 5. ✅ **Update docs**: Update README.md, CLAUDE.md, or inline documentation as needed
 6. ✅ **Check metrics**: Ensure new features increment appropriate metrics
 7. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
@@ -587,6 +651,34 @@ Default: Polling disabled, webhooks recommended
 4. ✅ Registry polling implementation
 5. ✅ Flux HelmRelease support (basic version monitoring)
 
+### ✅ 5. **StatefulSet/DaemonSet Support** (COMPLETED)
+Full support for StatefulSet and DaemonSet resources:
+
+```rust
+// In src/controller/statefulset.rs
+// ✅ Watches StatefulSet resources (Kubernetes apps/v1 API)
+// ✅ Parses Headwind annotations (same as Deployments)
+// ✅ Uses PolicyEngine for semantic version validation
+// ✅ Creates UpdateRequest CRDs for approval workflow
+// ✅ Applies updates via strategic merge patch
+// ✅ STATEFULSETS_WATCHED metric tracking
+
+// In src/controller/daemonset.rs
+// ✅ Watches DaemonSet resources (Kubernetes apps/v1 API)
+// ✅ Parses Headwind annotations (same as Deployments)
+// ✅ Uses PolicyEngine for semantic version validation
+// ✅ Creates UpdateRequest CRDs for approval workflow
+// ✅ Applies updates via strategic merge patch
+// ✅ DAEMONSETS_WATCHED metric tracking
+
+// In src/approval/mod.rs::execute_update()
+// ✅ Routes StatefulSet updates via execute_statefulset_update()
+// ✅ Routes DaemonSet updates via execute_daemonset_update()
+// ✅ Full error handling and status reporting
+```
+
+**Implementation**: All three workload controllers (Deployment, StatefulSet, DaemonSet) follow identical patterns and share the same annotation schema.
+
 ### High Priority (Next)
 1. Add integration tests with real cluster
 2. Comprehensive end-to-end testing
@@ -594,12 +686,10 @@ Default: Polling disabled, webhooks recommended
 4. Wiki documentation (#36)
 
 ### Medium Priority
-1. Full Helm repository querying for automatic version discovery
-2. StatefulSet/DaemonSet support
-3. Web UI for approvals
-4. Slack/Teams notifications
-5. Rollback functionality
-6. Automatic rollback on deployment failures
+1. Web UI for approvals
+2. Advanced Slack/Teams notification features
+3. Rollback functionality enhancements
+4. Automatic rollback on deployment failures
 
 ### Low Priority
 1. Multi-cluster support
@@ -646,5 +736,5 @@ For questions about this codebase, open an issue on GitHub with the `question` l
 
 ---
 
-Last Updated: 2025-11-06
-Version: 0.2.0-alpha (Core functionality complete, Helm support added, awaiting integration tests)
+Last Updated: 2025-11-07
+Version: 0.2.0-alpha (Core functionality complete, StatefulSet/DaemonSet/Helm support added, awaiting integration tests)

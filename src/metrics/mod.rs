@@ -69,6 +69,16 @@ lazy_static! {
         "Number of Helm releases being watched"
     ).unwrap();
 
+    pub static ref STATEFULSETS_WATCHED: IntGauge = IntGauge::new(
+        "headwind_statefulsets_watched",
+        "Number of StatefulSets being watched"
+    ).unwrap();
+
+    pub static ref DAEMONSETS_WATCHED: IntGauge = IntGauge::new(
+        "headwind_daemonsets_watched",
+        "Number of DaemonSets being watched"
+    ).unwrap();
+
     // Polling metrics
     pub static ref POLLING_CYCLES_TOTAL: IntCounter = IntCounter::new(
         "headwind_polling_cycles_total",
@@ -217,6 +227,10 @@ pub fn register_metrics() {
     REGISTRY
         .register(Box::new(HELM_RELEASES_WATCHED.clone()))
         .ok();
+    REGISTRY
+        .register(Box::new(STATEFULSETS_WATCHED.clone()))
+        .ok();
+    REGISTRY.register(Box::new(DAEMONSETS_WATCHED.clone())).ok();
     REGISTRY
         .register(Box::new(POLLING_CYCLES_TOTAL.clone()))
         .ok();

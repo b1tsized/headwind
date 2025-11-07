@@ -4,7 +4,7 @@ use crate::models::{ResourcePolicy, annotations};
 use crate::policy::PolicyEngine;
 use anyhow::Result;
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use kube::{Api, Client, ResourceExt};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -243,7 +243,7 @@ async fn process_image_push_event(
             }
 
             // Call the update handler
-            if let Err(e) = crate::controller::handle_image_update(
+            if let Err(e) = crate::controller::handle_deployment_image_update(
                 client.clone(),
                 policy_engine.clone(),
                 &deployment,
@@ -258,6 +258,208 @@ async fn process_image_push_event(
                     "Failed to handle image update for {}/{}: {}",
                     deployment.namespace().unwrap_or_default(),
                     deployment.name_any(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Process StatefulSets
+    process_statefulsets(client, policy_engine, event).await?;
+
+    // Process DaemonSets
+    process_daemonsets(client, policy_engine, event).await?;
+
+    Ok(())
+}
+
+/// Process StatefulSets for image update events
+async fn process_statefulsets(
+    client: &Client,
+    policy_engine: &Arc<PolicyEngine>,
+    event: &ImagePushEvent,
+) -> Result<()> {
+    let statefulsets: Api<StatefulSet> = Api::all(client.clone());
+    let statefulset_list = statefulsets.list(&Default::default()).await?;
+
+    debug!(
+        "Checking {} statefulsets for matching images",
+        statefulset_list.items.len()
+    );
+
+    for statefulset in statefulset_list.items {
+        // Check if statefulset has headwind annotations
+        let annotations = match &statefulset.metadata.annotations {
+            Some(ann) => ann,
+            None => continue,
+        };
+
+        // Skip if no policy annotation
+        if !annotations.contains_key(annotations::POLICY) {
+            continue;
+        }
+
+        // Check each container in the statefulset
+        let spec = match statefulset.spec.as_ref() {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let template_spec = match spec.template.spec.as_ref() {
+            Some(s) => s,
+            None => continue,
+        };
+
+        for container in &template_spec.containers {
+            let current_image = match container.image.as_ref() {
+                Some(img) => img,
+                None => continue,
+            };
+
+            // Parse the current image
+            let (image_name, current_tag) = match parse_image_full(current_image) {
+                Ok(parts) => parts,
+                Err(e) => {
+                    warn!("Failed to parse image {}: {}", current_image, e);
+                    continue;
+                },
+            };
+
+            // Check if this container uses the image from the webhook event
+            let matches = images_match(&event.registry, &event.repository, &image_name);
+            if !matches {
+                continue;
+            }
+
+            info!(
+                "Found matching statefulset {}/{} container {} using {}",
+                statefulset.namespace().unwrap_or_default(),
+                statefulset.name_any(),
+                container.name,
+                current_image
+            );
+
+            // Skip if it's the same version
+            if current_tag == event.tag {
+                debug!(
+                    "Container {} already using tag {}, skipping",
+                    container.name, event.tag
+                );
+                continue;
+            }
+
+            // Call the update handler
+            if let Err(e) = crate::controller::handle_statefulset_image_update(
+                client,
+                policy_engine,
+                &statefulset,
+                &image_name,
+                &event.tag,
+            )
+            .await
+            {
+                error!(
+                    "Failed to handle image update for statefulset {}/{}: {}",
+                    statefulset.namespace().unwrap_or_default(),
+                    statefulset.name_any(),
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Process DaemonSets for image update events
+async fn process_daemonsets(
+    client: &Client,
+    policy_engine: &Arc<PolicyEngine>,
+    event: &ImagePushEvent,
+) -> Result<()> {
+    let daemonsets: Api<DaemonSet> = Api::all(client.clone());
+    let daemonset_list = daemonsets.list(&Default::default()).await?;
+
+    debug!(
+        "Checking {} daemonsets for matching images",
+        daemonset_list.items.len()
+    );
+
+    for daemonset in daemonset_list.items {
+        // Check if daemonset has headwind annotations
+        let annotations = match &daemonset.metadata.annotations {
+            Some(ann) => ann,
+            None => continue,
+        };
+
+        // Skip if no policy annotation
+        if !annotations.contains_key(annotations::POLICY) {
+            continue;
+        }
+
+        // Check each container in the daemonset
+        let spec = match daemonset.spec.as_ref() {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let template_spec = match spec.template.spec.as_ref() {
+            Some(s) => s,
+            None => continue,
+        };
+
+        for container in &template_spec.containers {
+            let current_image = match container.image.as_ref() {
+                Some(img) => img,
+                None => continue,
+            };
+
+            // Parse the current image
+            let (image_name, current_tag) = match parse_image_full(current_image) {
+                Ok(parts) => parts,
+                Err(e) => {
+                    warn!("Failed to parse image {}: {}", current_image, e);
+                    continue;
+                },
+            };
+
+            // Check if this container uses the image from the webhook event
+            let matches = images_match(&event.registry, &event.repository, &image_name);
+            if !matches {
+                continue;
+            }
+
+            info!(
+                "Found matching daemonset {}/{} container {} using {}",
+                daemonset.namespace().unwrap_or_default(),
+                daemonset.name_any(),
+                container.name,
+                current_image
+            );
+
+            // Skip if it's the same version
+            if current_tag == event.tag {
+                debug!(
+                    "Container {} already using tag {}, skipping",
+                    container.name, event.tag
+                );
+                continue;
+            }
+
+            // Call the update handler
+            if let Err(e) = crate::controller::handle_daemonset_image_update(
+                client,
+                policy_engine,
+                &daemonset,
+                &image_name,
+                &event.tag,
+            )
+            .await
+            {
+                error!(
+                    "Failed to handle image update for daemonset {}/{}: {}",
+                    daemonset.namespace().unwrap_or_default(),
+                    daemonset.name_any(),
                     e
                 );
             }
