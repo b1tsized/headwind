@@ -584,6 +584,8 @@ Available metrics:
 - `headwind_polling_cycles_total` - Total polling cycles completed
 - `headwind_polling_images_checked_total` - Images checked during polling
 - `headwind_polling_new_tags_found_total` - New tags discovered via polling
+- `headwind_polling_helm_charts_checked_total` - Helm charts checked during polling
+- `headwind_polling_helm_new_versions_found_total` - Helm chart versions discovered via polling
 - `headwind_polling_errors_total` - Polling errors encountered
 - `headwind_updates_pending` - Updates awaiting approval
 - `headwind_updates_approved_total` - Total approved updates

@@ -77,6 +77,8 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
 
 **Private Registry Authentication**: ✅ Fully supported via Kubernetes imagePullSecrets. Reads credentials from ServiceAccount and uses them for registry API calls. Supports Docker Hub, ECR, GCR, ACR, Harbor, GHCR, and GitLab registries.
 
+**Helm Chart Polling**: ✅ Fully supported for both OCI and HTTP/HTTPS Helm repositories. Polling discovers HelmReleases with headwind annotations, queries the referenced HelmRepository for available versions, applies policy engine for version selection, and creates UpdateRequests when new versions are found. Supports both traditional HTTP repos (index.yaml parsing) and OCI registries (tag listing). Controlled by same `HEADWIND_POLLING_ENABLED` environment variable.
+
 #### 3. Policy Engine (`src/policy/mod.rs`)
 - **Purpose**: Determines if an update should happen based on semantic versioning
 - **Policies**:
@@ -233,6 +235,7 @@ All workload controllers support the same set of Headwind annotations:
 - ✅ Sends notifications with resource kind differentiation
 - ✅ Full metrics tracking
 - ✅ Private repository authentication via secretRef
+- ✅ Registry polling for Helm charts (both OCI and HTTP repositories)
 
 **Repository Support**:
 - **HTTP Helm Repositories**: ✅ Fully supported (parses index.yaml, semantic versioning)
@@ -286,6 +289,8 @@ All workload controllers support the same set of Headwind annotations:
   - `headwind_polling_errors_total` - Counter
   - `headwind_polling_images_checked_total` - Counter
   - `headwind_polling_new_tags_found_total` - Counter
+  - `headwind_polling_helm_charts_checked_total` - Counter
+  - `headwind_polling_helm_new_versions_found_total` - Counter
 
 **Important**: Remember to increment metrics when implementing new features!
 
