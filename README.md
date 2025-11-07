@@ -14,9 +14,9 @@ Headwind monitors container registries and automatically updates your Kubernetes
 - **Full Observability**: Prometheus metrics, distributed tracing, and structured logging
 - **Resource Support**:
   - Kubernetes Deployments ✅
+  - Kubernetes StatefulSets ✅
+  - Kubernetes DaemonSets ✅
   - Flux HelmReleases ✅
-  - StatefulSets (planned)
-  - DaemonSets (planned)
 - **Lightweight**: Single binary, no database required
 - **Secure**: Runs as non-root, read-only filesystem, minimal permissions
 
@@ -972,7 +972,11 @@ spec:
   - Approval workflow integration
   - Chart version patching on approval
   - Full metrics and notification support
-- [ ] StatefulSet/DaemonSet support
+- [x] StatefulSet/DaemonSet support (completed)
+  - StatefulSet and DaemonSet controllers
+  - Same annotation-based configuration as Deployments
+  - Approval workflow integration
+  - Full metrics support
 - [ ] Multi-architecture Docker images (arm64, amd64)
 
 ### v0.4.0 - Enhanced UX (Low Priority)
