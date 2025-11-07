@@ -8,15 +8,17 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 pub use daemonset::{
-    DaemonSetController, update_daemonset_image, update_daemonset_image_with_tracking,
+    DaemonSetController, handle_image_update as handle_daemonset_image_update,
+    update_daemonset_image, update_daemonset_image_with_tracking,
 };
 pub use deployment::{
-    DeploymentController, handle_image_update, update_deployment_image,
-    update_deployment_image_with_tracking,
+    DeploymentController, handle_image_update as handle_deployment_image_update,
+    update_deployment_image, update_deployment_image_with_tracking,
 };
 pub use helm::HelmController;
 pub use statefulset::{
-    StatefulSetController, update_statefulset_image, update_statefulset_image_with_tracking,
+    StatefulSetController, handle_image_update as handle_statefulset_image_update,
+    update_statefulset_image, update_statefulset_image_with_tracking,
 };
 
 pub async fn start_controllers() -> Result<JoinHandle<()>> {

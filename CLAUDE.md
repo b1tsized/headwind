@@ -435,14 +435,35 @@ The pre-commit hooks will automatically run:
 - Secret detection
 - Trailing whitespace removal
 
+### MANDATORY: Test All Changes Before Committing
+
+**CRITICAL IMPERATIVE FOR AI ASSISTANTS**:
+
+Before committing ANY code changes, you MUST:
+
+1. ✅ **Test manually in the local Kubernetes cluster**: Every code change affecting runtime behavior MUST be tested end-to-end with the actual cluster, not just unit tests
+2. ✅ **Run all unit tests**: `cargo test` - All tests must pass
+3. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings` - Zero warnings allowed
+4. ✅ **Format code**: `cargo fmt --all` - Consistent formatting required
+5. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
+
+**Testing Guidelines**:
+- For webhook changes: Send test webhook payloads and verify processing
+- For controller changes: Deploy test resources and verify reconciliation
+- For approval changes: Test approval/rejection workflows via API
+- For polling changes: Enable polling and verify detection
+- For notification changes: Verify Slack/webhook notifications are sent
+
+**DO NOT** commit code that has only been verified to compile and pass unit tests. Real integration testing in the cluster is mandatory.
+
 ### Before Creating a Pull Request
 
 **CRITICAL CHECKLIST**:
 
-1. ✅ **Run all tests**: `cargo test`
-2. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings`
-3. ✅ **Format code**: `cargo fmt --all`
-4. ✅ **Test manually**: If possible, test changes in a real Kubernetes cluster
+1. ✅ **Test manually**: MANDATORY - Test all changes in the local Kubernetes cluster
+2. ✅ **Run all tests**: `cargo test`
+3. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings`
+4. ✅ **Format code**: `cargo fmt --all`
 5. ✅ **Update docs**: Update README.md, CLAUDE.md, or inline documentation as needed
 6. ✅ **Check metrics**: Ensure new features increment appropriate metrics
 7. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
