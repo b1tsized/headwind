@@ -604,3 +604,116 @@ async fn create_update_request(
 
     Ok(ur_name)
 }
+
+/// Handle a Helm chart update event from webhooks
+///
+/// This function is called when a new chart version is pushed to an OCI registry.
+/// It evaluates the update policy and creates an UpdateRequest if the new version
+/// should be applied.
+pub async fn handle_chart_update(
+    client: &Client,
+    policy_engine: &Arc<PolicyEngine>,
+    helm_release: &HelmRelease,
+    new_version: &str,
+) -> Result<()> {
+    let namespace = helm_release.namespace().unwrap_or_default();
+    let name = helm_release.name_any();
+
+    info!(
+        "Handling chart update for HelmRelease {}/{} to version {}",
+        namespace, name, new_version
+    );
+
+    // Parse policy from annotations
+    let update_policy = parse_policy_from_annotations(helm_release.metadata.annotations.as_ref());
+
+    // Get current version from HelmRelease spec
+    let current_version = helm_release
+        .spec
+        .chart
+        .spec
+        .version
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("No version specified in HelmRelease"))?;
+
+    // Get chart name
+    let chart_name = &helm_release.spec.chart.spec.chart;
+
+    // Build temporary ResourcePolicy for policy check
+    let temp_policy = ResourcePolicy {
+        policy: update_policy,
+        pattern: None,
+        require_approval: true,
+        min_update_interval: None,
+        images: Vec::new(),
+    };
+
+    // Check if update is allowed by policy
+    let should_update = policy_engine
+        .should_update(&temp_policy, current_version, new_version)
+        .unwrap_or(false);
+
+    if !should_update {
+        info!(
+            "Update from {} to {} not allowed by policy {:?} for HelmRelease {}/{}",
+            current_version, new_version, update_policy, namespace, name
+        );
+        return Ok(());
+    }
+
+    info!(
+        "Update from {} to {} allowed by policy {:?} for HelmRelease {}/{}",
+        current_version, new_version, update_policy, namespace, name
+    );
+
+    // Build ResourcePolicy struct from annotations
+    let annotations = helm_release.metadata.annotations.as_ref();
+    let require_approval = annotations
+        .and_then(|a| a.get(annotations::REQUIRE_APPROVAL))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(true);
+
+    let min_update_interval = annotations
+        .and_then(|a| a.get(annotations::MIN_UPDATE_INTERVAL))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
+
+    let pattern = annotations
+        .and_then(|a| a.get(annotations::PATTERN))
+        .map(|s| s.to_string());
+
+    let resource_policy = ResourcePolicy {
+        policy: update_policy,
+        pattern,
+        require_approval,
+        min_update_interval: Some(min_update_interval),
+        images: Vec::new(),
+    };
+
+    // Check if approval is required
+    if resource_policy.require_approval {
+        info!(
+            "Creating UpdateRequest for HelmRelease {}/{}",
+            namespace, name
+        );
+        create_update_request(
+            client.clone(),
+            &namespace,
+            &name,
+            chart_name,
+            current_version,
+            new_version,
+            &resource_policy,
+        )
+        .await?;
+    } else {
+        info!(
+            "Approval not required, updating HelmRelease {}/{} directly",
+            namespace, name
+        );
+        // TODO: Implement direct update logic
+        warn!("Direct HelmRelease updates without approval not yet implemented");
+    }
+
+    Ok(())
+}

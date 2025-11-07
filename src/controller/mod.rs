@@ -15,7 +15,7 @@ pub use deployment::{
     DeploymentController, handle_image_update as handle_deployment_image_update,
     update_deployment_image, update_deployment_image_with_tracking,
 };
-pub use helm::HelmController;
+pub use helm::{HelmController, handle_chart_update as handle_helm_chart_update};
 pub use statefulset::{
     StatefulSetController, handle_image_update as handle_statefulset_image_update,
     update_statefulset_image, update_statefulset_image_with_tracking,

@@ -21,8 +21,9 @@ async fn main() -> Result<()> {
     // Initialize metrics server
     let metrics_handle = metrics::start_metrics_server().await?;
 
-    // Initialize webhook server and get event sender
-    let (webhook_handle, event_sender) = webhook::start_webhook_server().await?;
+    // Initialize webhook server and get event senders (image & chart)
+    let (webhook_handle, event_sender, _chart_event_sender) =
+        webhook::start_webhook_server().await?;
 
     // Initialize registry poller (optional, disabled by default)
     let polling_config = polling::PollingConfig {
