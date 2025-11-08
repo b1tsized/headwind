@@ -469,14 +469,27 @@ Before committing ANY code changes, you MUST:
 2. ✅ **Run all tests**: `cargo test`
 3. ✅ **Pass clippy**: `cargo clippy --all-features --all-targets -- -D warnings`
 4. ✅ **Format code**: `cargo fmt --all`
-5. ✅ **Update docs**: MANDATORY - Update README.md and CLAUDE.md to reflect all changes
-   - README.md: User-facing documentation (features, configuration, metrics)
-   - CLAUDE.md: Architecture documentation (implementation details, design decisions)
-   - Both must be updated BEFORE creating the PR, not after
+5. ✅ **Update docs**: MANDATORY - Update ALL documentation to reflect changes
+   - **README.md**: User-facing documentation (features, configuration, metrics)
+   - **CLAUDE.md**: Architecture documentation (implementation details, design decisions)
+   - **Docusaurus docs** (`docs/docs/`): Update or create pages for new features
+     - Configuration guides: `docs/docs/configuration/*.md`
+     - User guides: `docs/docs/guides/*.md`
+     - API reference: `docs/docs/api/*.md`
+   - **All docs must be updated BEFORE creating the PR, not after**
+   - New features require corresponding documentation pages
+   - Changed features require updates to existing pages
 6. ✅ **Check metrics**: Ensure new features increment appropriate metrics
-7. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
-8. ✅ **Reference templates**: Use `.github/PULL_REQUEST_TEMPLATE/pull_request_template.md` format
-9. ✅ **Reference issues**: Link to related GitHub issues using `Fixes #X` or `Relates to #X`
+7. ✅ **Update metrics documentation**: Add new metrics to `docs/docs/api/metrics.md`
+8. ✅ **Run pre-commit checks**: `pre-commit run --all-files` (if hooks are installed)
+9. ✅ **GitHub PR metadata**: MANDATORY - Set before creating PR
+   - **Assignee**: Assign to yourself or the primary contributor
+   - **Labels**: Add appropriate labels (e.g., `enhancement`, `bug`, `documentation`, `priority:high`)
+   - **Linked issues**: Use GitHub's "Development" section to link related issues
+   - **Closes/Fixes**: Use `Closes #X` or `Fixes #X` in PR description to auto-close issues
+   - **Related issues**: Use `Relates to #X` for context without auto-closing
+10. ✅ **Reference templates**: Use `.github/PULL_REQUEST_TEMPLATE/pull_request_template.md` format
+11. ✅ **PR title**: Use conventional commits format (e.g., `feat:`, `fix:`, `docs:`, `chore:`)
 
 **Testing in Kubernetes**:
 
@@ -771,6 +784,72 @@ If you're stuck, consider:
    - Add error handling
    - Log appropriately
    - Increment error metrics
+
+## Repository Organization
+
+### Directory Structure
+
+```
+headwind/
+├── .github/              # GitHub Actions workflows and issue/PR templates
+│   └── workflows/        # CI/CD workflows (tests, linting, docs deployment)
+├── deploy/               # Kubernetes deployment manifests
+│   └── k8s/             # K8s YAML files (CRDs, RBAC, deployments, services)
+│       ├── crds/        # Custom Resource Definitions
+│       └── ...
+├── docs/                 # Docusaurus documentation site
+│   ├── docs/            # Documentation markdown files
+│   │   ├── configuration/  # Configuration guides
+│   │   ├── guides/         # User guides
+│   │   └── api/            # API reference
+│   ├── src/             # Custom React components
+│   └── static/          # Static assets (images, CNAME)
+├── examples/             # Example configurations and test files
+│   ├── test-manifests/  # Test YAML files for manual testing
+│   ├── scripts/         # Test scripts (webhooks, notifications)
+│   └── *.yaml           # Production-ready example configurations
+├── scripts/              # Development and build scripts
+├── src/                  # Rust source code
+│   ├── controller/      # Kubernetes controllers
+│   ├── webhook/         # Webhook server
+│   ├── approval/        # Approval API
+│   ├── policy/          # Policy engine
+│   ├── models/          # Data models
+│   ├── metrics/         # Prometheus metrics
+│   ├── helm/            # Helm repository clients
+│   └── ...
+├── tests/                # Integration tests
+├── target/               # Rust build artifacts (gitignored)
+├── CLAUDE.md             # Architecture and development context (for AI assistants)
+├── README.md             # User-facing documentation
+├── CONTRIBUTING.md       # Contribution guidelines
+├── KUBECTL_PLUGIN.md     # kubectl plugin documentation
+├── Cargo.toml            # Rust dependencies
+├── Dockerfile            # Container image build
+└── Makefile              # Build and development commands
+```
+
+### File Organization Guidelines
+
+**Test Files:**
+- All test manifests go in `examples/test-manifests/`
+- Test scripts go in `examples/scripts/`
+- Never commit test files to the root directory
+
+**Documentation:**
+- User guides → `docs/docs/guides/`
+- Configuration docs → `docs/docs/configuration/`
+- API reference → `docs/docs/api/`
+- Architecture → `CLAUDE.md`
+- Quick start → `README.md`
+
+**Examples:**
+- Production-ready examples → `examples/*.yaml`
+- Test/development examples → `examples/test-manifests/`
+
+**Deployment:**
+- All Kubernetes manifests → `deploy/k8s/`
+- CRDs → `deploy/k8s/crds/`
 
 ## Contact & Support
 
