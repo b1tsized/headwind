@@ -1,0 +1,26 @@
+# CODEOWNERS file for Headwind
+# This file defines who owns which parts of the codebase and will be automatically
+# requested for review when a pull request modifies those files.
+#
+# More info: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+# These owners will be requested for review when someone opens a pull request
+* @headwind-sh/headwind
+
+# Documentation
+/docs/ @headwind-sh/headwind
+/README.md @headwind-sh/headwind
+/CLAUDE.md @headwind-sh/headwind
+
+# Configuration files
+/.github/ @headwind-sh/headwind
+/deploy/ @headwind-sh/headwind
+
+# Rust source code
+/src/ @headwind-sh/headwind
+/Cargo.toml @headwind-sh/headwind
+/Cargo.lock @headwind-sh/headwind
+
+# Examples and test files
+/examples/ @headwind-sh/headwind
