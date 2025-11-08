@@ -31,6 +31,8 @@ fn create_router() -> Router {
         .route("/health", get(routes::health_check))
         // Dashboard route (main page)
         .route("/", get(routes::dashboard))
+        // Settings page
+        .route("/settings", get(routes::settings_page))
         // Individual update request detail view
         .route("/updates/{namespace}/{name}", get(routes::update_detail))
         // Settings API endpoints

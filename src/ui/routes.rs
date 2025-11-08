@@ -135,6 +135,12 @@ fn extract_versions(current_image: &str, new_image: &str) -> (String, String) {
     (current_version, new_version)
 }
 
+/// Settings page - displays settings management UI
+pub async fn settings_page() -> impl IntoResponse {
+    info!("Rendering settings page");
+    templates::settings()
+}
+
 /// Get current settings from ConfigMap and Secret
 pub async fn get_settings() -> impl IntoResponse {
     info!("Getting Headwind settings");
@@ -209,6 +215,11 @@ pub async fn update_settings(Json(config): Json<HeadwindConfig>) -> impl IntoRes
 
 /// Test notification endpoint - sends a test notification
 pub async fn test_notification(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+    use crate::notifications::{
+        DeploymentInfo, NotificationEvent, NotificationPayload, Notifier, SlackConfig,
+        SlackNotifier, TeamsConfig, TeamsNotifier, WebhookConfig, WebhookNotifier,
+    };
+
     info!("Testing notification: {:?}", payload);
 
     // Extract notification type from payload
@@ -217,17 +228,171 @@ pub async fn test_notification(Json(payload): Json<serde_json::Value>) -> impl I
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
 
-    match notification_type {
-        "slack" | "teams" | "webhook" => {
-            // TODO: Implement actual notification sending
-            // For now, just return success
-            (
-                StatusCode::OK,
+    // Get Kubernetes client and load current configuration
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
-                    "message": format!("Test {} notification sent successfully", notification_type)
+                    "error": "Failed to connect to Kubernetes API"
                 })),
             )
-                .into_response()
+                .into_response();
+        },
+    };
+
+    let config = match HeadwindConfig::load(client).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to load configuration: {}", e)
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    // Create a test notification payload
+    let test_deployment = DeploymentInfo {
+        name: "test-deployment".to_string(),
+        namespace: "default".to_string(),
+        current_image: "nginx:1.25.0".to_string(),
+        new_image: "nginx:1.26.0".to_string(),
+        container: Some("nginx".to_string()),
+        resource_kind: Some("Deployment".to_string()),
+    };
+
+    let test_payload =
+        NotificationPayload::new(NotificationEvent::UpdateRequestCreated, test_deployment)
+            .with_policy("minor")
+            .with_requires_approval(true);
+
+    // Send notification based on type
+    match notification_type {
+        "slack" => {
+            let slack_config = SlackConfig {
+                enabled: config.notifications.slack.enabled,
+                webhook_url: config.notifications.slack.webhook_url.clone(),
+                channel: config.notifications.slack.channel.clone(),
+                username: config.notifications.slack.username.clone(),
+                icon_emoji: config.notifications.slack.icon_emoji.clone(),
+            };
+
+            match SlackNotifier::new(slack_config) {
+                Ok(notifier) => match notifier.send(&test_payload).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "message": "Test Slack notification sent successfully"
+                        })),
+                    )
+                        .into_response(),
+                    Err(e) => {
+                        error!("Failed to send test Slack notification: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": format!("Failed to send Slack notification: {}", e)
+                            })),
+                        )
+                            .into_response()
+                    },
+                },
+                Err(e) => {
+                    error!("Failed to create Slack notifier: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": format!("Slack not configured: {}", e)
+                        })),
+                    )
+                        .into_response()
+                },
+            }
+        },
+        "teams" => {
+            let teams_config = TeamsConfig {
+                enabled: config.notifications.teams.enabled,
+                webhook_url: config.notifications.teams.webhook_url.clone(),
+            };
+
+            match TeamsNotifier::new(teams_config) {
+                Ok(notifier) => match notifier.send(&test_payload).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "message": "Test Teams notification sent successfully"
+                        })),
+                    )
+                        .into_response(),
+                    Err(e) => {
+                        error!("Failed to send test Teams notification: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": format!("Failed to send Teams notification: {}", e)
+                            })),
+                        )
+                            .into_response()
+                    },
+                },
+                Err(e) => {
+                    error!("Failed to create Teams notifier: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": format!("Teams not configured: {}", e)
+                        })),
+                    )
+                        .into_response()
+                },
+            }
+        },
+        "webhook" => {
+            let webhook_config = WebhookConfig {
+                enabled: config.notifications.webhook.enabled,
+                url: config.notifications.webhook.url.clone(),
+                secret: None,
+                timeout_seconds: 10,
+                max_retries: 3,
+            };
+
+            match WebhookNotifier::new(webhook_config) {
+                Ok(notifier) => match notifier.send(&test_payload).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "message": "Test webhook notification sent successfully"
+                        })),
+                    )
+                        .into_response(),
+                    Err(e) => {
+                        error!("Failed to send test webhook notification: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": format!("Failed to send webhook notification: {}", e)
+                            })),
+                        )
+                            .into_response()
+                    },
+                },
+                Err(e) => {
+                    error!("Failed to create webhook notifier: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": format!("Webhook not configured: {}", e)
+                        })),
+                    )
+                        .into_response()
+                },
+            }
         },
         _ => (
             StatusCode::BAD_REQUEST,

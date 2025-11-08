@@ -1,8 +1,12 @@
+use futures::StreamExt;
 use k8s_openapi::api::core::v1::{ConfigMap, Secret};
+use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use tracing::{debug, info, warn};
+use std::sync::{Arc, RwLock};
+use tokio::time::Duration;
+use tracing::{debug, error, info, warn};
 
 const CONFIGMAP_NAME: &str = "headwind-config";
 const SECRET_NAME: &str = "headwind-secrets";
@@ -336,6 +340,149 @@ fn get_secret_value(data: &BTreeMap<String, String>, key: &str) -> Option<String
     data.get(key)
         .filter(|v| !v.is_empty())
         .map(|v| v.to_string())
+}
+
+/// Global configuration cache for hot-reload
+static GLOBAL_CONFIG: once_cell::sync::Lazy<Arc<RwLock<Option<HeadwindConfig>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(None)));
+
+/// Get the current cached configuration
+pub fn get_cached_config() -> Option<HeadwindConfig> {
+    GLOBAL_CONFIG.read().ok()?.clone()
+}
+
+/// Update the cached configuration
+fn update_cached_config(config: HeadwindConfig) {
+    if let Ok(mut cache) = GLOBAL_CONFIG.write() {
+        *cache = Some(config);
+        info!("Configuration cache updated");
+    }
+}
+
+/// Start watching ConfigMap and Secret for changes
+/// This enables hot-reload of configuration without restarting the application
+pub async fn start_config_watcher(client: Client) {
+    info!("Starting configuration watcher for hot-reload");
+
+    let configmap_api: Api<ConfigMap> = Api::namespaced(client.clone(), NAMESPACE);
+    let secret_api: Api<Secret> = Api::namespaced(client.clone(), NAMESPACE);
+
+    // Load initial configuration
+    match HeadwindConfig::load(client.clone()).await {
+        Ok(config) => {
+            info!("Initial configuration loaded successfully");
+            update_cached_config(config);
+        },
+        Err(e) => {
+            error!("Failed to load initial configuration: {}", e);
+        },
+    }
+
+    // Spawn ConfigMap watcher
+    let cm_client = client.clone();
+    tokio::spawn(async move {
+        loop {
+            let watcher_config = watcher::Config::default().timeout(60).any_semantic();
+
+            let mut stream = watcher(configmap_api.clone(), watcher_config)
+                .default_backoff()
+                .boxed();
+
+            info!(
+                "ConfigMap watcher started for {}/{}",
+                NAMESPACE, CONFIGMAP_NAME
+            );
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(watcher::Event::Apply(cm)) => {
+                        if cm.metadata.name.as_deref() == Some(CONFIGMAP_NAME) {
+                            info!(
+                                "ConfigMap {} changed, reloading configuration",
+                                CONFIGMAP_NAME
+                            );
+                            if let Ok(config) = HeadwindConfig::load(cm_client.clone()).await {
+                                update_cached_config(config);
+                            } else {
+                                error!("Failed to reload configuration after ConfigMap change");
+                            }
+                        }
+                    },
+                    Ok(watcher::Event::Delete(_)) => {
+                        warn!("ConfigMap {} was deleted", CONFIGMAP_NAME);
+                    },
+                    Ok(watcher::Event::Init) => {
+                        info!("ConfigMap watcher initialized");
+                    },
+                    Ok(watcher::Event::InitApply(cm)) => {
+                        if cm.metadata.name.as_deref() == Some(CONFIGMAP_NAME) {
+                            info!("ConfigMap {} initial load", CONFIGMAP_NAME);
+                        }
+                    },
+                    Ok(watcher::Event::InitDone) => {
+                        info!("ConfigMap watcher init done");
+                    },
+                    Err(e) => {
+                        error!("ConfigMap watcher error: {}", e);
+                    },
+                }
+            }
+
+            warn!("ConfigMap watcher stream ended, restarting in 5 seconds...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+
+    // Spawn Secret watcher
+    let secret_client = client.clone();
+    tokio::spawn(async move {
+        loop {
+            let watcher_config = watcher::Config::default().timeout(60).any_semantic();
+
+            let mut stream = watcher(secret_api.clone(), watcher_config)
+                .default_backoff()
+                .boxed();
+
+            info!("Secret watcher started for {}/{}", NAMESPACE, SECRET_NAME);
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(watcher::Event::Apply(secret)) => {
+                        if secret.metadata.name.as_deref() == Some(SECRET_NAME) {
+                            info!("Secret {} changed, reloading configuration", SECRET_NAME);
+                            if let Ok(config) = HeadwindConfig::load(secret_client.clone()).await {
+                                update_cached_config(config);
+                            } else {
+                                error!("Failed to reload configuration after Secret change");
+                            }
+                        }
+                    },
+                    Ok(watcher::Event::Delete(_)) => {
+                        warn!("Secret {} was deleted", SECRET_NAME);
+                    },
+                    Ok(watcher::Event::Init) => {
+                        info!("Secret watcher initialized");
+                    },
+                    Ok(watcher::Event::InitApply(secret)) => {
+                        if secret.metadata.name.as_deref() == Some(SECRET_NAME) {
+                            info!("Secret {} initial load", SECRET_NAME);
+                        }
+                    },
+                    Ok(watcher::Event::InitDone) => {
+                        info!("Secret watcher init done");
+                    },
+                    Err(e) => {
+                        error!("Secret watcher error: {}", e);
+                    },
+                }
+            }
+
+            warn!("Secret watcher stream ended, restarting in 5 seconds...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+
+    info!("Configuration watchers started successfully");
 }
 
 #[cfg(test)]

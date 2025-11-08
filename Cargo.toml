@@ -69,6 +69,7 @@ sha2 = "0.10"
 
 # Async trait
 async-trait = "0.1"
+once_cell = "1.21.3"
 
 [dev-dependencies]
 # No additional test dependencies needed yet - tests use core functionality

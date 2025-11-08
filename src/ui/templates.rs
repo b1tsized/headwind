@@ -59,6 +59,7 @@ pub fn base_layout(title: &str, content: Markup) -> Markup {
                     div class="flex-none" {
                         ul class="menu menu-horizontal px-1" {
                             li { a href="/" { "Dashboard" } }
+                            li { a href="/settings" { "Settings" } }
                             li { a href="/health" { "Health" } }
                         }
                     }
@@ -729,4 +730,301 @@ fn get_unique_policies(updates: &[UpdateRequestView]) -> Vec<String> {
     policies.sort();
     policies.dedup();
     policies
+}
+
+/// Settings page template
+pub fn settings() -> Markup {
+    let content = html! {
+        h1 class="text-3xl font-bold mb-6" { "Settings" }
+
+        // Loading indicator
+        div id="settings-loading" class="flex justify-center items-center py-12" {
+            span class="loading loading-spinner loading-lg" {}
+        }
+
+        // Settings form (hidden until loaded)
+        div id="settings-form" class="hidden" {
+            // Polling Configuration
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" { "Polling Configuration" }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Registry Polling" }
+                            input type="checkbox" id="polling-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control" {
+                        label class="label" {
+                            span class="label-text" { "Polling Interval (seconds)" }
+                        }
+                        input type="number" id="polling-interval" class="input input-bordered" min="60" step="60" value="300";
+                    }
+                }
+            }
+
+            // Helm Configuration
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" { "Helm Configuration" }
+
+                    div class="form-control" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Helm Auto-Discovery" }
+                            input type="checkbox" id="helm-auto-discovery" class="checkbox checkbox-primary" checked;
+                        }
+                    }
+                }
+            }
+
+            // Controllers Configuration
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" { "Controllers Configuration" }
+
+                    div class="form-control" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Kubernetes Controllers" }
+                            input type="checkbox" id="controllers-enabled" class="checkbox checkbox-primary" checked;
+                        }
+                    }
+                }
+            }
+
+            // Slack Notifications
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" {
+                        "Slack Notifications"
+                        button class="btn btn-sm btn-outline ml-4" onclick="testNotification('slack')" {
+                            "Test"
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Slack Notifications" }
+                            input type="checkbox" id="slack-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "Webhook URL" }
+                        }
+                        input type="url" id="slack-webhook-url" class="input input-bordered" placeholder="https://hooks.slack.com/services/...";
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "Channel (optional)" }
+                        }
+                        input type="text" id="slack-channel" class="input input-bordered" placeholder="#deployments";
+                    }
+
+                    div class="grid grid-cols-2 gap-4" {
+                        div class="form-control" {
+                            label class="label" {
+                                span class="label-text" { "Username" }
+                            }
+                            input type="text" id="slack-username" class="input input-bordered" value="Headwind";
+                        }
+
+                        div class="form-control" {
+                            label class="label" {
+                                span class="label-text" { "Icon Emoji" }
+                            }
+                            input type="text" id="slack-icon-emoji" class="input input-bordered" value=":sailboat:";
+                        }
+                    }
+                }
+            }
+
+            // Teams Notifications
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" {
+                        "Microsoft Teams Notifications"
+                        button class="btn btn-sm btn-outline ml-4" onclick="testNotification('teams')" {
+                            "Test"
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Teams Notifications" }
+                            input type="checkbox" id="teams-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control" {
+                        label class="label" {
+                            span class="label-text" { "Webhook URL" }
+                        }
+                        input type="url" id="teams-webhook-url" class="input input-bordered" placeholder="https://outlook.office.com/webhook/...";
+                    }
+                }
+            }
+
+            // Generic Webhook Notifications
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" {
+                        "Generic Webhook Notifications"
+                        button class="btn btn-sm btn-outline ml-4" onclick="testNotification('webhook')" {
+                            "Test"
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Webhook Notifications" }
+                            input type="checkbox" id="webhook-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control" {
+                        label class="label" {
+                            span class="label-text" { "Webhook URL" }
+                        }
+                        input type="url" id="webhook-url" class="input input-bordered" placeholder="https://example.com/webhook";
+                    }
+                }
+            }
+
+            // Action buttons
+            div class="flex gap-4 mt-6" {
+                button class="btn btn-primary" onclick="saveSettings()" {
+                    "Save Settings"
+                }
+                button class="btn btn-ghost" onclick="window.location.reload()" {
+                    "Cancel"
+                }
+            }
+        }
+
+        // JavaScript for settings management
+        script {
+            (maud::PreEscaped(r#"
+            // Load settings on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                loadSettings();
+            });
+
+            // Load current settings from API
+            async function loadSettings() {
+                try {
+                    const response = await fetch('/api/v1/settings');
+                    const config = await response.json();
+
+                    // Populate form fields
+                    document.getElementById('polling-enabled').checked = config.polling.enabled;
+                    document.getElementById('polling-interval').value = config.polling.interval;
+                    document.getElementById('helm-auto-discovery').checked = config.helm.autoDiscovery;
+                    document.getElementById('controllers-enabled').checked = config.controllers.enabled;
+
+                    document.getElementById('slack-enabled').checked = config.notifications.slack.enabled;
+                    document.getElementById('slack-webhook-url').value = config.notifications.slack.webhookUrl || '';
+                    document.getElementById('slack-channel').value = config.notifications.slack.channel || '';
+                    document.getElementById('slack-username').value = config.notifications.slack.username || 'Headwind';
+                    document.getElementById('slack-icon-emoji').value = config.notifications.slack.iconEmoji || ':sailboat:';
+
+                    document.getElementById('teams-enabled').checked = config.notifications.teams.enabled;
+                    document.getElementById('teams-webhook-url').value = config.notifications.teams.webhookUrl || '';
+
+                    document.getElementById('webhook-enabled').checked = config.notifications.webhook.enabled;
+                    document.getElementById('webhook-url').value = config.notifications.webhook.url || '';
+
+                    // Show form, hide loading
+                    document.getElementById('settings-loading').classList.add('hidden');
+                    document.getElementById('settings-form').classList.remove('hidden');
+                } catch (error) {
+                    console.error('Failed to load settings:', error);
+                    showToast('Failed to load settings', 'error');
+                }
+            }
+
+            // Save settings to API
+            async function saveSettings() {
+                const config = {
+                    polling: {
+                        enabled: document.getElementById('polling-enabled').checked,
+                        interval: parseInt(document.getElementById('polling-interval').value)
+                    },
+                    helm: {
+                        autoDiscovery: document.getElementById('helm-auto-discovery').checked
+                    },
+                    controllers: {
+                        enabled: document.getElementById('controllers-enabled').checked
+                    },
+                    notifications: {
+                        slack: {
+                            enabled: document.getElementById('slack-enabled').checked,
+                            webhookUrl: document.getElementById('slack-webhook-url').value || null,
+                            channel: document.getElementById('slack-channel').value || null,
+                            username: document.getElementById('slack-username').value || null,
+                            iconEmoji: document.getElementById('slack-icon-emoji').value || null
+                        },
+                        teams: {
+                            enabled: document.getElementById('teams-enabled').checked,
+                            webhookUrl: document.getElementById('teams-webhook-url').value || null
+                        },
+                        webhook: {
+                            enabled: document.getElementById('webhook-enabled').checked,
+                            url: document.getElementById('webhook-url').value || null
+                        }
+                    }
+                };
+
+                try {
+                    const response = await fetch('/api/v1/settings', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(config)
+                    });
+
+                    if (response.ok) {
+                        showToast('Settings saved successfully!', 'success');
+                        setTimeout(() => window.location.href = '/', 2000);
+                    } else {
+                        const error = await response.json();
+                        showToast('Failed to save settings: ' + (error.error || 'Unknown error'), 'error');
+                    }
+                } catch (error) {
+                    console.error('Failed to save settings:', error);
+                    showToast('Failed to save settings', 'error');
+                }
+            }
+
+            // Test notification
+            async function testNotification(type) {
+                try {
+                    const response = await fetch('/api/v1/settings/test-notification', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ type })
+                    });
+
+                    const result = await response.json();
+                    if (response.ok) {
+                        showToast(result.message, 'success');
+                    } else {
+                        showToast('Test failed: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                } catch (error) {
+                    console.error('Test notification failed:', error);
+                    showToast('Test notification failed', 'error');
+                }
+            }
+            "#))
+        }
+    };
+
+    base_layout("Settings - Headwind", content)
 }

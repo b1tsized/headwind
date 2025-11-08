@@ -705,6 +705,7 @@ dependencies = [
  "lazy_static",
  "maud",
  "oci-distribution",
+ "once_cell",
  "prometheus",
  "reqwest",
  "schemars",

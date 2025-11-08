@@ -1,5 +1,6 @@
 use anyhow::Result;
-use headwind::{approval, controller, metrics, notifications, polling, ui, webhook};
+use headwind::{approval, config, controller, metrics, notifications, polling, ui, webhook};
+use kube::Client;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -14,6 +15,12 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting Headwind - Kubernetes Update Operator");
+
+    // Create Kubernetes client
+    let client = Client::try_default().await?;
+
+    // Start configuration watcher for hot-reload
+    config::start_config_watcher(client.clone()).await;
 
     // Initialize notification manager
     notifications::init_notifications();
