@@ -957,7 +957,7 @@ impl RegistryPoller {
     }
 
     /// Send a chart update event
-    /// Supports both OCI (oci://registry.io/path/to/chart) and HTTP (https://charts.example.com) URLs
+    /// Supports both OCI (oci://registry.io/path/to/chart) and HTTP (<https://charts.example.com>) URLs
     fn send_chart_event(
         &self,
         repository_url: &str,
