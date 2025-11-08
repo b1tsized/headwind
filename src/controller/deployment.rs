@@ -182,13 +182,6 @@ async fn reconcile(
             "Processing container {} with image {}:{}",
             container.name, image_name, current_tag
         );
-
-        // TODO: Query registry for available tags
-        // For now, we'll need webhook/polling events to trigger updates
-        // This will be implemented in a follow-up
-        debug!(
-            "Registry polling not yet implemented - updates will be triggered by webhooks/polling events"
-        );
     }
 
     Ok(Action::requeue(Duration::from_secs(60)))
@@ -485,6 +478,21 @@ fn parse_policy_from_annotations(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+    }
+
+    if let Some(event_source) = annotations.get(annotations::EVENT_SOURCE) {
+        policy.event_source = event_source.parse().map_err(|e| {
+            kube::Error::Api(kube::core::ErrorResponse {
+                status: "Error".to_string(),
+                message: format!("Failed to parse event source: {}", e),
+                reason: "InvalidEventSource".to_string(),
+                code: 400,
+            })
+        })?;
+    }
+
+    if let Some(polling_interval) = annotations.get(annotations::POLLING_INTERVAL) {
+        policy.polling_interval = polling_interval.parse().ok();
     }
 
     Ok(policy)

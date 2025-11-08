@@ -673,9 +673,31 @@ Headwind complements Flux CD:
        └──────────────┘
 ```
 
+## Event Sources
+
+Control how Headwind detects updates for this HelmRelease:
+
+```yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: my-app
+  annotations:
+    headwind.sh/policy: "minor"
+    # Use webhooks (default, fastest)
+    headwind.sh/event-source: "webhook"
+
+    # Or use polling for Helm repository
+    # headwind.sh/event-source: "polling"
+    # headwind.sh/polling-interval: "600"  # Check for new charts every 10 minutes
+```
+
+See [Event Sources](./event-sources.md) for detailed configuration options.
+
 ## Next Steps
 
 - [Update Policies](../update-policies.md) - Understand semantic versioning
+- [Configure Event Sources](./event-sources.md) - Webhooks vs polling
 - [Approval Workflow](./approval-workflow.md) - Configure approval process
 - [Notifications](./notifications.md) - Set up Slack/Teams alerts
 - [Working with UpdateRequests](../guides/update-requests.md) - Manage updates

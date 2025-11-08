@@ -129,6 +129,32 @@ rate(headwind_polling_helm_charts_checked_total[5m])
 rate(headwind_polling_helm_new_versions_found_total[1h])
 ```
 
+### `headwind_polling_resources_filtered_total`
+
+**Type**: Counter
+
+**Description**: Resources filtered out from polling due to `event-source` annotation
+
+**Details**: Incremented when resources have `event-source: webhook` or `event-source: none` set. These resources are skipped during polling cycles to reduce unnecessary registry API calls.
+
+**Example**:
+```promql
+# Resources filtered from polling
+headwind_polling_resources_filtered_total
+
+# Filter rate per polling cycle
+rate(headwind_polling_resources_filtered_total[5m]) / rate(headwind_polling_cycles_total[5m])
+
+# Percentage of resources using webhooks only
+headwind_polling_resources_filtered_total /
+  (headwind_polling_resources_filtered_total + headwind_polling_images_checked_total)
+```
+
+**Use Cases**:
+- Monitor adoption of webhook vs polling event sources
+- Track resource distribution across event source types
+- Optimize polling efficiency
+
 ## Update Metrics
 
 Track update requests and their lifecycle:

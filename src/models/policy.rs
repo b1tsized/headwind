@@ -21,10 +21,26 @@ pub enum UpdatePolicy {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EventSource {
+    /// Process webhook events only (default)
+    #[default]
+    Webhook,
+    /// Process polling events only
+    Polling,
+    /// Process both webhook and polling events
+    Both,
+    /// Only process manual UpdateRequest CRDs
+    None,
+}
+
 #[derive(Debug, Error)]
 pub enum PolicyError {
     #[error("Invalid policy: {0}")]
     InvalidPolicy(String),
+    #[error("Invalid event source: {0}")]
+    InvalidEventSource(String),
 }
 
 impl FromStr for UpdatePolicy {
@@ -40,6 +56,20 @@ impl FromStr for UpdatePolicy {
             "force" => Ok(UpdatePolicy::Force),
             "none" => Ok(UpdatePolicy::None),
             _ => Err(PolicyError::InvalidPolicy(s.to_string())),
+        }
+    }
+}
+
+impl FromStr for EventSource {
+    type Err = PolicyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "webhook" => Ok(EventSource::Webhook),
+            "polling" => Ok(EventSource::Polling),
+            "both" => Ok(EventSource::Both),
+            "none" => Ok(EventSource::None),
+            _ => Err(PolicyError::InvalidEventSource(s.to_string())),
         }
     }
 }
@@ -60,6 +90,12 @@ pub struct ResourcePolicy {
 
     /// Images to track (if empty, track all)
     pub images: Vec<String>,
+
+    /// Event source configuration (webhook, polling, both, none)
+    pub event_source: EventSource,
+
+    /// Per-resource polling interval in seconds (overrides global setting)
+    pub polling_interval: Option<u64>,
 }
 
 impl Default for ResourcePolicy {
@@ -70,6 +106,8 @@ impl Default for ResourcePolicy {
             require_approval: true,
             min_update_interval: Some(300), // 5 minutes
             images: Vec::new(),
+            event_source: EventSource::default(),
+            polling_interval: None,
         }
     }
 }
@@ -83,6 +121,10 @@ pub mod annotations {
     pub const IMAGES: &str = "headwind.sh/images";
     #[allow(dead_code)]
     pub const LAST_UPDATE: &str = "headwind.sh/last-update";
+
+    // Event source configuration
+    pub const EVENT_SOURCE: &str = "headwind.sh/event-source";
+    pub const POLLING_INTERVAL: &str = "headwind.sh/polling-interval";
 
     // Automatic rollback annotations
     pub const AUTO_ROLLBACK: &str = "headwind.sh/auto-rollback";

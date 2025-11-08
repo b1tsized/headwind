@@ -1,7 +1,7 @@
 use crate::metrics::{DAEMONSETS_WATCHED, RECONCILE_DURATION, RECONCILE_ERRORS};
 use crate::models::{
-    ResourcePolicy, TargetRef, UpdatePolicy, UpdatePolicyType, UpdateRequest, UpdateRequestSpec,
-    UpdateType, annotations,
+    EventSource, ResourcePolicy, TargetRef, UpdatePolicy, UpdatePolicyType, UpdateRequest,
+    UpdateRequestSpec, UpdateType, annotations,
 };
 use crate::notifications::{self, DeploymentInfo};
 use crate::policy::PolicyEngine;
@@ -514,12 +514,23 @@ fn parse_policy_from_annotations(
         .map(|s| s.split(',').map(|i| i.trim().to_string()).collect())
         .unwrap_or_default();
 
+    let event_source = annotations
+        .get(annotations::EVENT_SOURCE)
+        .and_then(|v| v.parse::<EventSource>().ok())
+        .unwrap_or_default();
+
+    let polling_interval = annotations
+        .get(annotations::POLLING_INTERVAL)
+        .and_then(|v| v.parse::<u64>().ok());
+
     Ok(ResourcePolicy {
         policy,
         pattern,
         require_approval,
         min_update_interval,
         images,
+        event_source,
+        polling_interval,
     })
 }
 

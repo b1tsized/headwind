@@ -614,12 +614,23 @@ fn build_resource_policy(
         .and_then(|ann| ann.get(annotations::MIN_UPDATE_INTERVAL))
         .and_then(|v| v.parse::<u64>().ok());
 
+    let event_source = annotations
+        .and_then(|ann| ann.get(annotations::EVENT_SOURCE))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_default();
+
+    let polling_interval = annotations
+        .and_then(|ann| ann.get(annotations::POLLING_INTERVAL))
+        .and_then(|v| v.parse::<u64>().ok());
+
     ResourcePolicy {
         policy,
         pattern,
         require_approval,
         min_update_interval,
         images: Vec::new(),
+        event_source,
+        polling_interval,
     }
 }
 
@@ -735,6 +746,8 @@ pub async fn handle_chart_update(
         require_approval: true,
         min_update_interval: None,
         images: Vec::new(),
+        event_source: Default::default(),
+        polling_interval: None,
     };
 
     // Check if update is allowed by policy
@@ -777,6 +790,8 @@ pub async fn handle_chart_update(
         require_approval,
         min_update_interval: Some(min_update_interval),
         images: Vec::new(),
+        event_source: Default::default(),
+        polling_interval: None,
     };
 
     // Check if approval is required

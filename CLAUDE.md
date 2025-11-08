@@ -42,6 +42,10 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
 
 **Status**: ✅ **COMPLETED** - Webhook events are now connected to the controller and create UpdateRequests
 
+**Features**:
+1. **Event-source filtering**: Only processes webhook events for resources with `event-source: webhook` or `event-source: both`
+2. **Resource type support**: Filters implemented for Deployments, StatefulSets, DaemonSets, and HelmReleases
+
 #### 2. Registry Poller (`src/polling/mod.rs`)
 - **Purpose**: Alternative to webhooks - polls registries for new tags and digest changes
 - **Configuration**:
@@ -72,8 +76,10 @@ Registry ──┬─→ Webhook Server ──→ Policy Engine → Approval Sys
 1. **Digest-based detection**: Detects when images are rebuilt and pushed to the same tag
 2. **Version discovery**: Lists all tags and finds the best match based on update policy
 3. **Smart filtering**: Skips non-version tags for semver policies
-4. **Deduplication**: Tracks unique image+policy combinations to avoid redundant checks
-5. **Caching**: Maintains in-memory cache of last seen tag+digest per image
+4. **Event-source filtering**: Only polls resources with `event-source: polling` or `event-source: both` (via POLLING_RESOURCES_FILTERED metric)
+5. **Per-resource polling intervals**: Respects `headwind.sh/polling-interval` annotation to override global interval per-resource
+6. **Deduplication**: Tracks unique image+policy combinations to avoid redundant checks
+7. **Caching**: Maintains in-memory cache of last seen tag+digest per image and last poll time per resource
 
 **Private Registry Authentication**: ✅ Fully supported via Kubernetes imagePullSecrets. Reads credentials from ServiceAccount and uses them for registry API calls. Supports Docker Hub, ECR, GCR, ACR, Harbor, GHCR, and GitLab registries.
 
@@ -298,8 +304,9 @@ All workload controllers support the same set of Headwind annotations:
 
 #### Policy Models (`models/policy.rs`)
 - `UpdatePolicy` enum - The 7 policy types
-- `ResourcePolicy` struct - Full policy configuration
-- `annotations` module - Annotation key constants
+- `EventSource` enum - 4 event source types (webhook, polling, both, none)
+- `ResourcePolicy` struct - Full policy configuration including event source and polling interval
+- `annotations` module - Annotation key constants including `EVENT_SOURCE` and `POLLING_INTERVAL`
 
 #### Update Models (`models/update.rs`)
 - `UpdateRequest` - Pending update request

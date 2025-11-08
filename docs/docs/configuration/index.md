@@ -26,6 +26,8 @@ All resource types support the same set of annotations:
 | `headwind.sh/require-approval` | boolean | `true` | Whether updates require manual approval |
 | `headwind.sh/min-update-interval` | integer | `300` | Minimum seconds between updates |
 | `headwind.sh/images` | string | - | Comma-separated list of images to track (empty = all) |
+| `headwind.sh/event-source` | string | `webhook` | Event source: `webhook`, `polling`, `both`, or `none` |
+| `headwind.sh/polling-interval` | integer | - | Per-resource polling interval (seconds), overrides global setting |
 | `headwind.sh/auto-rollback` | boolean | `false` | Enable automatic rollback on failures |
 | `headwind.sh/rollback-timeout` | integer | `300` | Health check monitoring duration (seconds) |
 | `headwind.sh/health-check-retries` | integer | `3` | Failed health checks before rollback |
@@ -103,5 +105,7 @@ See the specific configuration guides for each resource type and feature:
 - [StatefulSets](./statefulsets.md)
 - [DaemonSets](./daemonsets.md)
 - [HelmReleases](./helmreleases.md)
+- [Event Sources](./event-sources.md) - Configure webhooks vs polling per-resource
 - [Notifications](./notifications.md)
 - [Approval Workflow](./approval-workflow.md)
+- [Rollback](./rollback.md)

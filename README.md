@@ -72,6 +72,13 @@ metadata:
     # Specific images to track (comma-separated, empty = all)
     headwind.sh/images: "nginx, redis"
 
+    # Event source: webhook, polling, both, none (default: webhook)
+    headwind.sh/event-source: "webhook"
+
+    # Per-resource polling interval in seconds (overrides global HEADWIND_POLLING_INTERVAL)
+    # Only applies when event-source is "polling" or "both"
+    headwind.sh/polling-interval: "600"
+
     # Automatic rollback on deployment failures (default: false)
     headwind.sh/auto-rollback: "true"
 
@@ -164,6 +171,13 @@ metadata:
 
     # Minimum time between updates in seconds (default: 300)
     headwind.sh/min-update-interval: "300"
+
+    # Event source: webhook, polling, both, none (default: webhook)
+    headwind.sh/event-source: "webhook"
+
+    # Per-resource polling interval in seconds (overrides global HEADWIND_POLLING_INTERVAL)
+    # Only applies when event-source is "polling" or "both"
+    headwind.sh/polling-interval: "600"
 spec:
   interval: 5m
   chart:
@@ -274,6 +288,98 @@ env:
 - Testing or development environments
 
 **Note:** Polling is less efficient and has a delay. Use webhooks when possible.
+
+### 3. Per-Resource Event Source Configuration
+
+By default, all resources use webhooks as their event source (`headwind.sh/event-source: "webhook"`). You can override this on a per-resource basis:
+
+**Event Source Options:**
+- `webhook` (default) - Only respond to webhook events, skip registry polling
+- `polling` - Only use registry polling, ignore webhook events
+- `both` - Respond to both webhooks and polling (redundant but ensures coverage)
+- `none` - Disable all update triggers for this resource
+
+**Use Cases:**
+
+**Webhook-only resources** (default):
+```yaml
+metadata:
+  annotations:
+    headwind.sh/policy: "minor"
+    headwind.sh/event-source: "webhook"  # Can be omitted (default)
+```
+Best for registries with webhook support. Updates are immediate when new images are pushed.
+
+**Polling-only resources:**
+```yaml
+metadata:
+  annotations:
+    headwind.sh/policy: "minor"
+    headwind.sh/event-source: "polling"
+    headwind.sh/polling-interval: "600"  # Optional: poll every 10 minutes
+```
+Best for:
+- Registries without webhook support
+- Resources that should be checked less frequently
+- Development/staging environments
+
+**Both webhooks and polling:**
+```yaml
+metadata:
+  annotations:
+    headwind.sh/policy: "minor"
+    headwind.sh/event-source: "both"
+```
+Provides redundancy - updates will be detected via webhooks (fast) or polling (fallback).
+
+**Per-resource polling intervals:**
+
+When using `event-source: "polling"` or `event-source: "both"`, you can override the global `HEADWIND_POLLING_INTERVAL` for specific resources:
+
+```yaml
+metadata:
+  annotations:
+    headwind.sh/policy: "minor"
+    headwind.sh/event-source: "polling"
+    headwind.sh/polling-interval: "60"   # Poll this resource every 60 seconds
+```
+
+This allows you to poll critical resources more frequently while checking less critical resources less often, reducing registry API load.
+
+**Example: Mixed event sources in a namespace:**
+
+```yaml
+# Production API - webhook-only (fastest)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-production
+  annotations:
+    headwind.sh/policy: "patch"
+    headwind.sh/event-source: "webhook"
+---
+# Staging API - polling every 5 minutes
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-staging
+  annotations:
+    headwind.sh/policy: "all"
+    headwind.sh/event-source: "polling"
+    headwind.sh/polling-interval: "300"
+    headwind.sh/require-approval: "false"
+---
+# Background job - polling every 30 minutes (low priority)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-job
+  annotations:
+    headwind.sh/policy: "minor"
+    headwind.sh/event-source: "polling"
+    headwind.sh/polling-interval: "1800"
+```
 
 ## Working with UpdateRequests
 
