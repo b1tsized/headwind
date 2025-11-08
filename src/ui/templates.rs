@@ -59,6 +59,7 @@ pub fn base_layout(title: &str, content: Markup) -> Markup {
                     div class="flex-none" {
                         ul class="menu menu-horizontal px-1" {
                             li { a href="/" { "Dashboard" } }
+                            li { a href="/observability" { "Observability" } }
                             li { a href="/settings" { "Settings" } }
                             li { a href="/health" { "Health" } }
                         }
@@ -894,6 +895,81 @@ pub fn settings() -> Markup {
                 }
             }
 
+            // Observability / Metrics Storage
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" { "Observability / Metrics Storage" }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "Metrics Backend" }
+                        }
+                        select id="observability-metrics-backend" class="select select-bordered w-full" {
+                            option value="auto" { "Auto (Discover Prometheus/VictoriaMetrics)" }
+                            option value="prometheus" { "Prometheus" }
+                            option value="victoriametrics" { "VictoriaMetrics" }
+                            option value="influxdb" { "InfluxDB" }
+                            option value="live" { "Live Only (No History)" }
+                        }
+                    }
+
+                    div class="divider" { "Prometheus Configuration" }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable Prometheus" }
+                            input type="checkbox" id="observability-prometheus-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "Prometheus URL" }
+                        }
+                        input type="url" id="observability-prometheus-url" class="input input-bordered" placeholder="http://prometheus-server.monitoring.svc.cluster.local:80";
+                    }
+
+                    div class="divider" { "VictoriaMetrics Configuration" }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable VictoriaMetrics" }
+                            input type="checkbox" id="observability-victoriametrics-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "VictoriaMetrics URL" }
+                        }
+                        input type="url" id="observability-victoriametrics-url" class="input input-bordered" placeholder="http://victoria-metrics.monitoring.svc.cluster.local:8428";
+                    }
+
+                    div class="divider" { "InfluxDB Configuration" }
+
+                    div class="form-control mb-4" {
+                        label class="label cursor-pointer" {
+                            span class="label-text" { "Enable InfluxDB" }
+                            input type="checkbox" id="observability-influxdb-enabled" class="checkbox checkbox-primary";
+                        }
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "InfluxDB URL" }
+                        }
+                        input type="url" id="observability-influxdb-url" class="input input-bordered" placeholder="http://influxdb.monitoring.svc.cluster.local:8086";
+                    }
+
+                    div class="form-control mb-4" {
+                        label class="label" {
+                            span class="label-text" { "InfluxDB Database" }
+                        }
+                        input type="text" id="observability-influxdb-database" class="input input-bordered" placeholder="headwind";
+                    }
+                }
+            }
+
             // Action buttons
             div class="flex gap-4 mt-6" {
                 button class="btn btn-primary" onclick="saveSettings()" {
@@ -937,6 +1013,16 @@ pub fn settings() -> Markup {
                     document.getElementById('webhook-enabled').checked = config.notifications.webhook.enabled;
                     document.getElementById('webhook-url').value = config.notifications.webhook.url || '';
 
+                    // Observability settings
+                    document.getElementById('observability-metrics-backend').value = config.observability.metricsBackend || 'auto';
+                    document.getElementById('observability-prometheus-enabled').checked = config.observability.prometheus.enabled;
+                    document.getElementById('observability-prometheus-url').value = config.observability.prometheus.url || '';
+                    document.getElementById('observability-victoriametrics-enabled').checked = config.observability.victoriametrics.enabled;
+                    document.getElementById('observability-victoriametrics-url').value = config.observability.victoriametrics.url || '';
+                    document.getElementById('observability-influxdb-enabled').checked = config.observability.influxdb.enabled;
+                    document.getElementById('observability-influxdb-url').value = config.observability.influxdb.url || '';
+                    document.getElementById('observability-influxdb-database').value = config.observability.influxdb.database || '';
+
                     // Show form, hide loading
                     document.getElementById('settings-loading').classList.add('hidden');
                     document.getElementById('settings-form').classList.remove('hidden');
@@ -974,6 +1060,22 @@ pub fn settings() -> Markup {
                         webhook: {
                             enabled: document.getElementById('webhook-enabled').checked,
                             url: document.getElementById('webhook-url').value || null
+                        }
+                    },
+                    observability: {
+                        metricsBackend: document.getElementById('observability-metrics-backend').value,
+                        prometheus: {
+                            enabled: document.getElementById('observability-prometheus-enabled').checked,
+                            url: document.getElementById('observability-prometheus-url').value || null
+                        },
+                        victoriametrics: {
+                            enabled: document.getElementById('observability-victoriametrics-enabled').checked,
+                            url: document.getElementById('observability-victoriametrics-url').value || null
+                        },
+                        influxdb: {
+                            enabled: document.getElementById('observability-influxdb-enabled').checked,
+                            url: document.getElementById('observability-influxdb-url').value || null,
+                            database: document.getElementById('observability-influxdb-database').value || null
                         }
                     }
                 };
@@ -1027,4 +1129,134 @@ pub fn settings() -> Markup {
     };
 
     base_layout("Settings - Headwind", content)
+}
+/// Observability page template
+pub fn observability() -> Markup {
+    let content = html! {
+        h1 class="text-3xl font-bold mb-6" { "Observability" }
+
+        // Loading indicator
+        div id="metrics-loading" class="flex justify-center items-center py-12" {
+            span class="loading loading-spinner loading-lg" {}
+        }
+
+        // Metrics dashboard (hidden until loaded)
+        div id="metrics-dashboard" class="hidden" {
+            // Backend info
+            div class="alert alert-info mb-6" {
+                div {
+                    svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6" {
+                        path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" {}
+                    }
+                    span { "Metrics backend: " span id="backend-type" class="font-bold" { "Loading..." } }
+                }
+            }
+
+            // Key metrics cards
+            div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6" {
+                // Updates Pending
+                div class="card bg-base-100 shadow-xl" {
+                    div class="card-body" {
+                        h2 class="card-title text-sm" { "Updates Pending" }
+                        p class="text-4xl font-bold" id="metric-updates-pending" { "0" }
+                    }
+                }
+                // Updates Approved
+                div class="card bg-base-100 shadow-xl" {
+                    div class="card-body" {
+                        h2 class="card-title text-sm" { "Updates Approved" }
+                        p class="text-4xl font-bold text-success" id="metric-updates-approved" { "0" }
+                    }
+                }
+                // Updates Applied
+                div class="card bg-base-100 shadow-xl" {
+                    div class="card-body" {
+                        h2 class="card-title text-sm" { "Updates Applied" }
+                        p class="text-4xl font-bold text-primary" id="metric-updates-applied" { "0" }
+                    }
+                }
+                // Updates Failed
+                div class="card bg-base-100 shadow-xl" {
+                    div class="card-body" {
+                        h2 class="card-title text-sm" { "Updates Failed" }
+                        p class="text-4xl font-bold text-error" id="metric-updates-failed" { "0" }
+                    }
+                }
+            }
+
+            // Resources watched
+            div class="card bg-base-100 shadow-xl mb-6" {
+                div class="card-body" {
+                    h2 class="card-title text-2xl mb-4" { "Resources Watched" }
+                    div class="grid grid-cols-2 md:grid-cols-4 gap-4" {
+                        div {
+                            p class="text-sm text-base-content/70" { "Deployments" }
+                            p class="text-2xl font-bold" id="metric-deployments-watched" { "0" }
+                        }
+                        div {
+                            p class="text-sm text-base-content/70" { "StatefulSets" }
+                            p class="text-2xl font-bold" id="metric-statefulsets-watched" { "0" }
+                        }
+                        div {
+                            p class="text-sm text-base-content/70" { "DaemonSets" }
+                            p class="text-2xl font-bold" id="metric-daemonsets-watched" { "0" }
+                        }
+                        div {
+                            p class="text-sm text-base-content/70" { "Helm Releases" }
+                            p class="text-2xl font-bold" id="metric-helm-releases-watched" { "0" }
+                        }
+                    }
+                }
+            }
+        }
+
+        // JavaScript for loading metrics
+        script {
+            (maud::PreEscaped(r#"
+            document.addEventListener('DOMContentLoaded', function() {
+                loadMetrics();
+                // Refresh metrics every 30 seconds
+                setInterval(loadMetrics, 30000);
+            });
+
+            async function loadMetrics() {
+                try {
+                    const response = await fetch('/api/v1/metrics');
+                    const metrics = await response.json();
+
+                    // Update backend type
+                    document.getElementById('backend-type').textContent = metrics.backend || 'Unknown';
+
+                    // Update metric values
+                    const metricIds = [
+                        'updates_pending',
+                        'updates_approved',
+                        'updates_applied',
+                        'updates_failed',
+                        'deployments_watched',
+                        'statefulsets_watched',
+                        'daemonsets_watched',
+                        'helm_releases_watched'
+                    ];
+
+                    metricIds.forEach(metricId => {
+                        const elem = document.getElementById('metric-' + metricId.replace(/_/g, '-'));
+                        if (elem && metrics[metricId] !== undefined) {
+                            elem.textContent = Math.round(metrics[metricId]);
+                        }
+                    });
+
+                    // Show dashboard, hide loading
+                    document.getElementById('metrics-loading').classList.add('hidden');
+                    document.getElementById('metrics-dashboard').classList.remove('hidden');
+                } catch (error) {
+                    console.error('Failed to load metrics:', error);
+                    showToast('Failed to load metrics', 'error');
+                }
+            }
+            "#))
+        }
+    };
+
+    base_layout("Observability - Headwind", content)
 }

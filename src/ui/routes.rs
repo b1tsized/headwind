@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use chrono::{Duration, Utc};
 use kube::{Api, Client};
 use tracing::{error, info};
 
@@ -401,5 +402,160 @@ pub async fn test_notification(Json(payload): Json<serde_json::Value>) -> impl I
             })),
         )
             .into_response(),
+    }
+}
+
+/// Observability page - metrics dashboard
+pub async fn observability_page() -> impl IntoResponse {
+    info!("Rendering observability page");
+    templates::observability()
+}
+
+/// Get metrics data for dashboard
+pub async fn get_metrics_data() -> impl IntoResponse {
+    use crate::metrics::client::create_metrics_client;
+
+    info!("Fetching metrics data");
+
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to connect to Kubernetes API"
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    let config = match HeadwindConfig::load(client).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to load configuration: {}", e)
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    // Create metrics client
+    let metrics_client = create_metrics_client(
+        &config.observability.metrics_backend,
+        config.observability.prometheus.url.clone(),
+        config.observability.prometheus.enabled,
+        config.observability.victoriametrics.url.clone(),
+        config.observability.victoriametrics.enabled,
+        config.observability.influxdb.url.clone(),
+        config.observability.influxdb.enabled,
+    )
+    .await;
+
+    // Query key metrics
+    let mut metrics = serde_json::Map::new();
+    metrics.insert(
+        "backend".to_string(),
+        serde_json::json!(metrics_client.backend_type()),
+    );
+
+    // Query instant metrics
+    let metric_queries = vec![
+        ("updates_pending", "headwind_updates_pending"),
+        ("updates_approved", "headwind_updates_approved_total"),
+        ("updates_rejected", "headwind_updates_rejected_total"),
+        ("updates_applied", "headwind_updates_applied_total"),
+        ("updates_failed", "headwind_updates_failed_total"),
+        ("deployments_watched", "headwind_deployments_watched"),
+        ("statefulsets_watched", "headwind_statefulsets_watched"),
+        ("daemonsets_watched", "headwind_daemonsets_watched"),
+        ("helm_releases_watched", "headwind_helm_releases_watched"),
+    ];
+
+    for (key, query) in metric_queries {
+        match metrics_client.query_instant(query).await {
+            Ok(value) => {
+                metrics.insert(key.to_string(), serde_json::json!(value.value));
+            },
+            Err(e) => {
+                error!("Failed to query metric {}: {}", query, e);
+                metrics.insert(key.to_string(), serde_json::json!(0));
+            },
+        }
+    }
+
+    (StatusCode::OK, Json(metrics)).into_response()
+}
+
+/// Get metrics time series for charts
+pub async fn get_metrics_timeseries(Path(metric_name): Path<String>) -> impl IntoResponse {
+    use crate::metrics::client::create_metrics_client;
+
+    info!("Fetching time series for metric: {}", metric_name);
+
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to connect to Kubernetes API"
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    let config = match HeadwindConfig::load(client).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to load configuration: {}", e)
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    // Create metrics client
+    let metrics_client = create_metrics_client(
+        &config.observability.metrics_backend,
+        config.observability.prometheus.url.clone(),
+        config.observability.prometheus.enabled,
+        config.observability.victoriametrics.url.clone(),
+        config.observability.victoriametrics.enabled,
+        config.observability.influxdb.url.clone(),
+        config.observability.influxdb.enabled,
+    )
+    .await;
+
+    // Query last 24 hours
+    let end = Utc::now();
+    let start = end - Duration::hours(24);
+
+    match metrics_client
+        .query_range(&metric_name, start, end, "5m")
+        .await
+    {
+        Ok(points) => (StatusCode::OK, Json(points)).into_response(),
+        Err(e) => {
+            error!("Failed to query metric time series {}: {}", metric_name, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to query metric: {}", e)
+                })),
+            )
+                .into_response()
+        },
     }
 }

@@ -19,6 +19,7 @@ pub struct HeadwindConfig {
     pub helm: HelmConfig,
     pub controllers: ControllersConfig,
     pub notifications: NotificationsConfig,
+    pub observability: ObservabilityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +70,34 @@ pub struct WebhookConfig {
     pub url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObservabilityConfig {
+    #[serde(rename = "metricsBackend")]
+    pub metrics_backend: String, // auto, prometheus, victoriametrics, influxdb, live
+    pub prometheus: PrometheusConfig,
+    pub victoriametrics: VictoriaMetricsConfig,
+    pub influxdb: InfluxDBConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrometheusConfig {
+    pub enabled: bool,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VictoriaMetricsConfig {
+    pub enabled: bool,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfluxDBConfig {
+    pub enabled: bool,
+    pub url: Option<String>,
+    pub database: Option<String>,
+}
+
 impl Default for HeadwindConfig {
     fn default() -> Self {
         Self {
@@ -95,6 +124,26 @@ impl Default for HeadwindConfig {
                 webhook: WebhookConfig {
                     enabled: false,
                     url: None,
+                },
+            },
+            observability: ObservabilityConfig {
+                metrics_backend: "auto".to_string(),
+                prometheus: PrometheusConfig {
+                    enabled: true,
+                    url: Some(
+                        "http://prometheus-server.monitoring.svc.cluster.local:80".to_string(),
+                    ),
+                },
+                victoriametrics: VictoriaMetricsConfig {
+                    enabled: true,
+                    url: Some(
+                        "http://victoria-metrics.monitoring.svc.cluster.local:8428".to_string(),
+                    ),
+                },
+                influxdb: InfluxDBConfig {
+                    enabled: false,
+                    url: Some("http://influxdb.monitoring.svc.cluster.local:8086".to_string()),
+                    database: Some("headwind".to_string()),
                 },
             },
         }
@@ -177,6 +226,48 @@ impl HeadwindConfig {
                     url: get_secret_value(&secret_data, "webhook-url"),
                 },
             },
+            observability: ObservabilityConfig {
+                metrics_backend: parse_optional_string(
+                    &config_data,
+                    "observability.metricsBackend",
+                )
+                .unwrap_or_else(|| "auto".to_string()),
+                prometheus: PrometheusConfig {
+                    enabled: parse_bool(&config_data, "observability.prometheus.enabled", true),
+                    url: parse_optional_string(&config_data, "observability.prometheus.url")
+                        .or_else(|| {
+                            Some(
+                                "http://prometheus-server.monitoring.svc.cluster.local:80"
+                                    .to_string(),
+                            )
+                        }),
+                },
+                victoriametrics: VictoriaMetricsConfig {
+                    enabled: parse_bool(
+                        &config_data,
+                        "observability.victoriametrics.enabled",
+                        true,
+                    ),
+                    url: parse_optional_string(&config_data, "observability.victoriametrics.url")
+                        .or_else(|| {
+                            Some(
+                                "http://victoria-metrics.monitoring.svc.cluster.local:8428"
+                                    .to_string(),
+                            )
+                        }),
+                },
+                influxdb: InfluxDBConfig {
+                    enabled: parse_bool(&config_data, "observability.influxdb.enabled", false),
+                    url: parse_optional_string(&config_data, "observability.influxdb.url").or_else(
+                        || Some("http://influxdb.monitoring.svc.cluster.local:8086".to_string()),
+                    ),
+                    database: parse_optional_string(
+                        &config_data,
+                        "observability.influxdb.database",
+                    )
+                    .or_else(|| Some("headwind".to_string())),
+                },
+            },
         };
 
         debug!("Loaded configuration: {:?}", config);
@@ -239,6 +330,50 @@ impl HeadwindConfig {
         config_data.insert(
             "webhook.enabled".to_string(),
             self.notifications.webhook.enabled.to_string(),
+        );
+        config_data.insert(
+            "observability.metricsBackend".to_string(),
+            self.observability.metrics_backend.clone(),
+        );
+        config_data.insert(
+            "observability.prometheus.enabled".to_string(),
+            self.observability.prometheus.enabled.to_string(),
+        );
+        config_data.insert(
+            "observability.prometheus.url".to_string(),
+            self.observability
+                .prometheus
+                .url
+                .clone()
+                .unwrap_or_default(),
+        );
+        config_data.insert(
+            "observability.victoriametrics.enabled".to_string(),
+            self.observability.victoriametrics.enabled.to_string(),
+        );
+        config_data.insert(
+            "observability.victoriametrics.url".to_string(),
+            self.observability
+                .victoriametrics
+                .url
+                .clone()
+                .unwrap_or_default(),
+        );
+        config_data.insert(
+            "observability.influxdb.enabled".to_string(),
+            self.observability.influxdb.enabled.to_string(),
+        );
+        config_data.insert(
+            "observability.influxdb.url".to_string(),
+            self.observability.influxdb.url.clone().unwrap_or_default(),
+        );
+        config_data.insert(
+            "observability.influxdb.database".to_string(),
+            self.observability
+                .influxdb
+                .database
+                .clone()
+                .unwrap_or_default(),
         );
 
         // Update or create ConfigMap

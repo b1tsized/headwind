@@ -5,6 +5,8 @@ use prometheus::{Encoder, Histogram, HistogramOpts, IntCounter, IntGauge, Regist
 use tokio::task::JoinHandle;
 use tracing::info;
 
+pub mod client;
+
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::new();
 

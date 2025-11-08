@@ -22,7 +22,7 @@ spec:
       serviceAccountName: headwind
       containers:
       - name: headwind
-        image: headwind:latest
+        image: headwind:test-phase6
         imagePullPolicy: IfNotPresent
         ports:
         - name: webhook
@@ -91,7 +91,7 @@ spec:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           runAsNonRoot: true
-          runAsUser: 1000
+          runAsUser: 1001
           capabilities:
             drop:
             - ALL

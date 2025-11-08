@@ -33,6 +33,8 @@ fn create_router() -> Router {
         .route("/", get(routes::dashboard))
         // Settings page
         .route("/settings", get(routes::settings_page))
+        // Observability page
+        .route("/observability", get(routes::observability_page))
         // Individual update request detail view
         .route("/updates/{namespace}/{name}", get(routes::update_detail))
         // Settings API endpoints
@@ -41,5 +43,11 @@ fn create_router() -> Router {
         .route(
             "/api/v1/settings/test-notification",
             post(routes::test_notification),
+        )
+        // Observability API endpoints
+        .route("/api/v1/metrics", get(routes::get_metrics_data))
+        .route(
+            "/api/v1/metrics/timeseries/{metric_name}",
+            get(routes::get_metrics_timeseries),
         )
 }

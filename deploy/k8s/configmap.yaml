@@ -37,3 +37,27 @@ data:
   # Generic Webhook Notifications
   # Enable generic webhook notifications (default: false)
   webhook.enabled: "false"
+
+  # Observability / Metrics Storage
+  # Metrics backend: auto, prometheus, victoriametrics, influxdb, live (default: auto)
+  observability.metricsBackend: "auto"
+
+  # Prometheus Configuration
+  # Enable Prometheus as metrics backend (default: true)
+  observability.prometheus.enabled: "true"
+  # Prometheus server URL (default: http://prometheus-server.monitoring.svc.cluster.local:80)
+  observability.prometheus.url: "http://prometheus-server.monitoring.svc.cluster.local:80"
+
+  # VictoriaMetrics Configuration
+  # Enable VictoriaMetrics as metrics backend (default: true)
+  observability.victoriametrics.enabled: "true"
+  # VictoriaMetrics server URL (default: http://victoria-metrics.monitoring.svc.cluster.local:8428)
+  observability.victoriametrics.url: "http://victoria-metrics.monitoring.svc.cluster.local:8428"
+
+  # InfluxDB Configuration
+  # Enable InfluxDB as metrics backend (default: false)
+  observability.influxdb.enabled: "false"
+  # InfluxDB server URL (default: http://influxdb.monitoring.svc.cluster.local:8086)
+  observability.influxdb.url: "http://influxdb.monitoring.svc.cluster.local:8086"
+  # InfluxDB database name (default: headwind)
+  observability.influxdb.database: "headwind"
