@@ -38,6 +38,33 @@ updates:
         update-types:
           - "patch"
 
+  # NPM dependencies (Docusaurus documentation site)
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "documentation"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Docusaurus core
+      docusaurus:
+        patterns:
+          - "@docusaurus/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # All other patch updates
+      npm-patch-updates:
+        update-types:
+          - "patch"
+
   # GitHub Actions - group all actions updates together
   - package-ecosystem: "github-actions"
     directory: "/"
