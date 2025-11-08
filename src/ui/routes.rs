@@ -7,8 +7,19 @@ use crate::models::crd::UpdateRequest;
 use super::templates::{self, UpdateRequestView};
 
 /// Health check endpoint for the Web UI
+/// Returns 200 OK if the UI server is running and can connect to Kubernetes API
+/// Returns 503 Service Unavailable if Kubernetes API is unreachable
 pub async fn health_check() -> impl IntoResponse {
-    (StatusCode::OK, "OK")
+    match Client::try_default().await {
+        Ok(_) => (StatusCode::OK, "OK"),
+        Err(e) => {
+            error!("Health check failed: Kubernetes API unreachable: {}", e);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Service Unavailable: Cannot reach Kubernetes API",
+            )
+        },
+    }
 }
 
 /// Dashboard route - main page showing all update requests
