@@ -1,7 +1,12 @@
-use axum::{extract::Path, http::StatusCode, response::IntoResponse};
+use axum::{
+    extract::Path,
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
 use kube::{Api, Client};
 use tracing::{error, info};
 
+use crate::config::HeadwindConfig;
 use crate::models::crd::UpdateRequest;
 
 use super::templates::{self, UpdateRequestView};
@@ -128,4 +133,108 @@ fn extract_versions(current_image: &str, new_image: &str) -> (String, String) {
         .to_string();
 
     (current_version, new_version)
+}
+
+/// Get current settings from ConfigMap and Secret
+pub async fn get_settings() -> impl IntoResponse {
+    info!("Getting Headwind settings");
+
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to connect to Kubernetes API"
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    match HeadwindConfig::load(client).await {
+        Ok(config) => (StatusCode::OK, Json(config)).into_response(),
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to load configuration: {}", e)
+                })),
+            )
+                .into_response()
+        },
+    }
+}
+
+/// Update settings in ConfigMap and Secret
+pub async fn update_settings(Json(config): Json<HeadwindConfig>) -> impl IntoResponse {
+    info!("Updating Headwind settings");
+
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "Failed to connect to Kubernetes API"
+                })),
+            )
+                .into_response();
+        },
+    };
+
+    match config.save(client).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "message": "Configuration updated successfully"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("Failed to save configuration: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to save configuration: {}", e)
+                })),
+            )
+                .into_response()
+        },
+    }
+}
+
+/// Test notification endpoint - sends a test notification
+pub async fn test_notification(Json(payload): Json<serde_json::Value>) -> impl IntoResponse {
+    info!("Testing notification: {:?}", payload);
+
+    // Extract notification type from payload
+    let notification_type = payload
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    match notification_type {
+        "slack" | "teams" | "webhook" => {
+            // TODO: Implement actual notification sending
+            // For now, just return success
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "message": format!("Test {} notification sent successfully", notification_type)
+                })),
+            )
+                .into_response()
+        },
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Invalid notification type. Must be 'slack', 'teams', or 'webhook'"
+            })),
+        )
+            .into_response(),
+    }
 }

@@ -4,6 +4,7 @@
 // the binary entrypoint in main.rs
 
 pub mod approval;
+pub mod config;
 pub mod controller;
 pub mod helm;
 pub mod metrics;

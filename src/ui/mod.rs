@@ -1,4 +1,7 @@
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{get, post, put},
+};
 use std::net::SocketAddr;
 use tower_http::services::ServeDir;
 use tracing::info;
@@ -30,4 +33,11 @@ fn create_router() -> Router {
         .route("/", get(routes::dashboard))
         // Individual update request detail view
         .route("/updates/{namespace}/{name}", get(routes::update_detail))
+        // Settings API endpoints
+        .route("/api/v1/settings", get(routes::get_settings))
+        .route("/api/v1/settings", put(routes::update_settings))
+        .route(
+            "/api/v1/settings/test-notification",
+            post(routes::test_notification),
+        )
 }
