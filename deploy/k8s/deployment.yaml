@@ -22,7 +22,7 @@ spec:
       serviceAccountName: headwind
       containers:
       - name: headwind
-        image: headwind:test-phase6-v13
+        image: headwind:test-phase7-v1
         imagePullPolicy: IfNotPresent
         ports:
         - name: webhook
@@ -63,6 +63,9 @@ spec:
               name: headwind-secrets
               key: webhook-url
               optional: true
+        # Web UI URL for notifications (e.g., https://headwind.example.com)
+        - name: HEADWIND_UI_URL
+          value: "http://localhost:8082"
         # Configuration from ConfigMap
         envFrom:
         - configMapRef:
