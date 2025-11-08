@@ -10,3 +10,4 @@ pub use crd::*;
 pub use helmrelease::*;
 pub use helmrepository::*;
 pub use policy::*;
+pub use webhook::{ChartPushEvent, ImagePushEvent};

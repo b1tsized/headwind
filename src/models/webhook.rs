@@ -51,7 +51,7 @@ pub struct Repository {
     pub name: String,
 }
 
-/// Normalized webhook event after parsing
+/// Normalized webhook event after parsing (for container images)
 #[derive(Debug, Clone)]
 pub struct ImagePushEvent {
     pub registry: String,
@@ -68,5 +68,35 @@ impl ImagePushEvent {
         } else {
             format!("{}/{}:{}", self.registry, self.repository, self.tag)
         }
+    }
+}
+
+/// Normalized webhook event for Helm chart pushes
+#[derive(Debug, Clone)]
+pub struct ChartPushEvent {
+    /// OCI registry (e.g., "ghcr.io", "registry.example.com")
+    pub registry: String,
+    /// Chart repository path (e.g., "myorg/charts/mychart")
+    pub repository: String,
+    /// Chart version (e.g., "1.2.3")
+    pub version: String,
+    /// SHA256 digest
+    pub digest: Option<String>,
+}
+
+impl ChartPushEvent {
+    /// Returns the full OCI URL for this chart
+    /// Example: oci://ghcr.io/myorg/charts/mychart:1.2.3
+    pub fn full_oci_url(&self) -> String {
+        format!(
+            "oci://{}/{}:{}",
+            self.registry, self.repository, self.version
+        )
+    }
+
+    /// Returns just the base OCI URL without version
+    /// Example: oci://ghcr.io/myorg/charts
+    pub fn base_oci_url(&self) -> String {
+        format!("oci://{}/{}", self.registry, self.repository)
     }
 }

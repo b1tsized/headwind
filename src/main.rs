@@ -21,8 +21,9 @@ async fn main() -> Result<()> {
     // Initialize metrics server
     let metrics_handle = metrics::start_metrics_server().await?;
 
-    // Initialize webhook server and get event sender
-    let (webhook_handle, event_sender) = webhook::start_webhook_server().await?;
+    // Initialize webhook server and get event senders (image & chart)
+    let (webhook_handle, event_sender, chart_event_sender) =
+        webhook::start_webhook_server().await?;
 
     // Initialize registry poller (optional, disabled by default)
     let polling_config = polling::PollingConfig {
@@ -35,7 +36,8 @@ async fn main() -> Result<()> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300),
     };
-    let poller = polling::RegistryPoller::new(polling_config, event_sender).await?;
+    let poller =
+        polling::RegistryPoller::new(polling_config, event_sender, chart_event_sender).await?;
     let polling_handle = poller.start().await;
 
     // Initialize approval API server

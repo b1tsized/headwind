@@ -1,5 +1,5 @@
 use crate::metrics::{WEBHOOK_EVENTS_PROCESSED, WEBHOOK_EVENTS_TOTAL};
-use crate::models::webhook::{DockerHubWebhook, ImagePushEvent, RegistryWebhook};
+use crate::models::webhook::{ChartPushEvent, DockerHubWebhook, ImagePushEvent, RegistryWebhook};
 use crate::models::{ResourcePolicy, annotations};
 use crate::policy::PolicyEngine;
 use anyhow::Result;
@@ -14,22 +14,31 @@ use tracing::{debug, error, info, warn};
 
 pub type EventSender = mpsc::UnboundedSender<ImagePushEvent>;
 pub type EventReceiver = mpsc::UnboundedReceiver<ImagePushEvent>;
+pub type ChartEventSender = mpsc::UnboundedSender<ChartPushEvent>;
+pub type ChartEventReceiver = mpsc::UnboundedReceiver<ChartPushEvent>;
 
 #[derive(Clone)]
 struct WebhookState {
     event_tx: EventSender,
+    chart_event_tx: ChartEventSender,
 }
 
-pub async fn start_webhook_server() -> Result<(JoinHandle<()>, EventSender)> {
+pub async fn start_webhook_server() -> Result<(JoinHandle<()>, EventSender, ChartEventSender)> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let (chart_event_tx, chart_event_rx) = mpsc::unbounded_channel();
 
-    // Clone sender to return it
+    // Clone senders to return them
     let event_tx_clone = event_tx.clone();
+    let chart_event_tx_clone = chart_event_tx.clone();
 
-    // Store the receiver globally or pass it to the controller
+    // Spawn processors for both event types
     tokio::spawn(process_webhook_events(event_rx));
+    tokio::spawn(process_chart_events(chart_event_rx));
 
-    let state = WebhookState { event_tx };
+    let state = WebhookState {
+        event_tx,
+        chart_event_tx,
+    };
 
     let app = Router::new()
         .route("/webhook/registry", post(handle_registry_webhook))
@@ -51,7 +60,7 @@ pub async fn start_webhook_server() -> Result<(JoinHandle<()>, EventSender)> {
             .expect("Webhook server failed");
     });
 
-    Ok((handle, event_tx_clone))
+    Ok((handle, event_tx_clone, chart_event_tx_clone))
 }
 
 async fn handle_registry_webhook(
@@ -69,16 +78,46 @@ async fn handle_registry_webhook(
         if event.action == "push"
             && let Some(tag) = event.target.tag
         {
-            let push_event = ImagePushEvent {
-                registry: extract_registry(&event.target.repository),
-                repository: event.target.repository.clone(),
-                tag,
-                digest: Some(event.target.digest),
-            };
+            // Check if this is a Helm chart based on mediaType
+            let is_helm_chart = event
+                .target
+                .media_type
+                .as_ref()
+                .map(|mt| mt.contains("helm.config"))
+                .unwrap_or(false);
 
-            if let Err(e) = state.event_tx.send(push_event) {
-                error!("Failed to send push event: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event");
+            if is_helm_chart {
+                // This is a Helm chart push
+                let chart_event = ChartPushEvent {
+                    registry: extract_registry(&event.target.repository),
+                    repository: event.target.repository.clone(),
+                    version: tag,
+                    digest: Some(event.target.digest),
+                };
+
+                info!(
+                    "Detected Helm chart push: {} version {}",
+                    chart_event.base_oci_url(),
+                    chart_event.version
+                );
+
+                if let Err(e) = state.chart_event_tx.send(chart_event) {
+                    error!("Failed to send chart push event: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event");
+                }
+            } else {
+                // This is a container image push
+                let push_event = ImagePushEvent {
+                    registry: extract_registry(&event.target.repository),
+                    repository: event.target.repository.clone(),
+                    tag,
+                    digest: Some(event.target.digest),
+                };
+
+                if let Err(e) = state.event_tx.send(push_event) {
+                    error!("Failed to send push event: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event");
+                }
             }
         }
     }
@@ -114,6 +153,133 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
 
+/// Macro to generate process_* functions for different Kubernetes resource types.
+/// This eliminates ~200 lines of duplicated code across process_deployments,
+/// process_statefulsets, and process_daemonsets.
+///
+/// Each generated function:
+/// 1. Queries all resources of the specified type
+/// 2. Checks for headwind annotations
+/// 3. Extracts pod template spec
+/// 4. Iterates containers to find matching images
+/// 5. Calls the resource-specific update handler
+macro_rules! impl_process_resources {
+    ($fn_name:ident, $resource_type:ty, $resource_name:expr, $handler_path:path) => {
+        async fn $fn_name(
+            client: &Client,
+            policy_engine: &Arc<PolicyEngine>,
+            event: &ImagePushEvent,
+        ) -> Result<()> {
+            let resources: Api<$resource_type> = Api::all(client.clone());
+            let resource_list = resources.list(&Default::default()).await?;
+
+            debug!(
+                "Checking {} {}s for matching images",
+                resource_list.items.len(),
+                $resource_name
+            );
+
+            for resource in resource_list.items {
+                // Check if resource has headwind annotations
+                let annotations = match &resource.metadata.annotations {
+                    Some(ann) => ann,
+                    None => continue,
+                };
+
+                // Skip if no policy annotation
+                if !annotations.contains_key(annotations::POLICY) {
+                    continue;
+                }
+
+                // Check each container in the resource
+                let spec = match resource.spec.as_ref() {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                let template_spec = match spec.template.spec.as_ref() {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                for container in &template_spec.containers {
+                    let current_image = match container.image.as_ref() {
+                        Some(img) => img,
+                        None => continue,
+                    };
+
+                    // Parse the current image
+                    let (image_name, current_tag) = match parse_image_full(current_image) {
+                        Ok(parts) => parts,
+                        Err(e) => {
+                            warn!("Failed to parse image {}: {}", current_image, e);
+                            continue;
+                        },
+                    };
+
+                    // Check if this container uses the image from the webhook event
+                    let matches = images_match(&event.registry, &event.repository, &image_name);
+                    if !matches {
+                        continue;
+                    }
+
+                    info!(
+                        "Found matching {} {}/{} container {} using {}",
+                        $resource_name,
+                        resource.namespace().unwrap_or_default(),
+                        resource.name_any(),
+                        container.name,
+                        current_image
+                    );
+
+                    // Skip if it's the same version
+                    if current_tag == event.tag {
+                        debug!(
+                            "Container {} already using tag {}, skipping",
+                            container.name, event.tag
+                        );
+                        continue;
+                    }
+
+                    // Call the update handler
+                    if let Err(e) =
+                        $handler_path(client, policy_engine, &resource, &image_name, &event.tag)
+                            .await
+                    {
+                        error!(
+                            "Failed to handle image update for {} {}/{}: {}",
+                            $resource_name,
+                            resource.namespace().unwrap_or_default(),
+                            resource.name_any(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            Ok(())
+        }
+    };
+}
+
+// Generate process_statefulsets and process_daemonsets functions using the macro
+// Note: process_deployments is not generated here because it has a different signature
+// and additional logic (policy parsing, image filtering, etc.) that doesn't match
+// the StatefulSet/DaemonSet pattern
+impl_process_resources!(
+    process_statefulsets,
+    StatefulSet,
+    "statefulset",
+    crate::controller::handle_statefulset_image_update
+);
+
+impl_process_resources!(
+    process_daemonsets,
+    DaemonSet,
+    "daemonset",
+    crate::controller::handle_daemonset_image_update
+);
+
 async fn process_webhook_events(mut rx: EventReceiver) {
     info!("Starting webhook event processor");
 
@@ -140,6 +306,142 @@ async fn process_webhook_events(mut rx: EventReceiver) {
     }
 
     warn!("Webhook event processor stopped");
+}
+
+/// Process Helm chart push events
+async fn process_chart_events(mut rx: ChartEventReceiver) {
+    info!("Starting chart event processor");
+
+    // Create Kubernetes client
+    let client = match Client::try_default().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create Kubernetes client: {}", e);
+            return;
+        },
+    };
+
+    let policy_engine = Arc::new(PolicyEngine);
+
+    while let Some(event) = rx.recv().await {
+        info!(
+            "Processing Helm chart push event: {} version {}",
+            event.base_oci_url(),
+            event.version
+        );
+
+        if let Err(e) = process_chart_push_event(&client, &policy_engine, &event).await {
+            error!("Failed to process chart push event: {}", e);
+            continue;
+        }
+
+        WEBHOOK_EVENTS_PROCESSED.inc();
+    }
+
+    warn!("Chart event processor stopped");
+}
+
+/// Process a single chart push event by finding matching HelmReleases
+async fn process_chart_push_event(
+    client: &Client,
+    policy_engine: &Arc<PolicyEngine>,
+    event: &ChartPushEvent,
+) -> Result<()> {
+    // Import HelmRelease and HelmRepository types
+    use crate::models::{HelmRelease, HelmRepository};
+
+    // Query all HelmReleases
+    let helm_releases: Api<HelmRelease> = Api::all(client.clone());
+    let release_list = helm_releases.list(&Default::default()).await?;
+
+    debug!(
+        "Checking {} HelmReleases for matching charts",
+        release_list.items.len()
+    );
+
+    // For each HelmRelease, check if it uses this chart
+    for helm_release in release_list.items {
+        // Check if release has headwind annotations
+        let annotations = match &helm_release.metadata.annotations {
+            Some(ann) => ann,
+            None => continue,
+        };
+
+        // Skip if no policy annotation
+        if !annotations.contains_key(annotations::POLICY) {
+            continue;
+        }
+
+        // Get chart name and source ref from HelmRelease spec
+        let chart_name = &helm_release.spec.chart.spec.chart;
+        let source_ref = &helm_release.spec.chart.spec.source_ref;
+
+        // Only process OCI HelmRepositories for now
+        if source_ref.kind != "HelmRepository" {
+            continue;
+        }
+
+        // Get the HelmRepository
+        let namespace = helm_release.namespace().unwrap_or_default();
+        let repo_namespace = source_ref.namespace.as_ref().unwrap_or(&namespace);
+        let helm_repos: Api<HelmRepository> = Api::namespaced(client.clone(), repo_namespace);
+
+        let helm_repo = match helm_repos.get(&source_ref.name).await {
+            Ok(repo) => repo,
+            Err(e) => {
+                warn!(
+                    "Failed to get HelmRepository {}/{}: {}",
+                    repo_namespace, source_ref.name, e
+                );
+                continue;
+            },
+        };
+
+        // Check if the repository URL matches the event
+        let repo_url = &helm_repo.spec.url;
+
+        // Match repository URL to event
+        // Event: oci://registry.example.com/charts/mychart
+        // HelmRepo URL: oci://registry.example.com
+        // Chart name: mychart
+        let expected_full_url = format!("{}/{}", repo_url.trim_end_matches('/'), chart_name);
+        let event_full_url = event.base_oci_url();
+
+        if expected_full_url != event_full_url {
+            debug!(
+                "Chart mismatch: expected={} event={}",
+                expected_full_url, event_full_url
+            );
+            continue;
+        }
+
+        info!(
+            "Found matching HelmRelease {}/{} for chart {} version {}",
+            namespace,
+            helm_release.name_any(),
+            chart_name,
+            event.version
+        );
+
+        // Call the helm controller's chart update handler
+        if let Err(e) = crate::controller::handle_helm_chart_update(
+            client,
+            policy_engine,
+            &helm_release,
+            &event.version,
+        )
+        .await
+        {
+            error!(
+                "Failed to handle chart update for {}/{}: {}",
+                namespace,
+                helm_release.name_any(),
+                e
+            );
+        }
+    }
+
+    Ok(())
 }
 
 async fn process_image_push_event(
@@ -269,202 +571,6 @@ async fn process_image_push_event(
 
     // Process DaemonSets
     process_daemonsets(client, policy_engine, event).await?;
-
-    Ok(())
-}
-
-/// Process StatefulSets for image update events
-async fn process_statefulsets(
-    client: &Client,
-    policy_engine: &Arc<PolicyEngine>,
-    event: &ImagePushEvent,
-) -> Result<()> {
-    let statefulsets: Api<StatefulSet> = Api::all(client.clone());
-    let statefulset_list = statefulsets.list(&Default::default()).await?;
-
-    debug!(
-        "Checking {} statefulsets for matching images",
-        statefulset_list.items.len()
-    );
-
-    for statefulset in statefulset_list.items {
-        // Check if statefulset has headwind annotations
-        let annotations = match &statefulset.metadata.annotations {
-            Some(ann) => ann,
-            None => continue,
-        };
-
-        // Skip if no policy annotation
-        if !annotations.contains_key(annotations::POLICY) {
-            continue;
-        }
-
-        // Check each container in the statefulset
-        let spec = match statefulset.spec.as_ref() {
-            Some(s) => s,
-            None => continue,
-        };
-
-        let template_spec = match spec.template.spec.as_ref() {
-            Some(s) => s,
-            None => continue,
-        };
-
-        for container in &template_spec.containers {
-            let current_image = match container.image.as_ref() {
-                Some(img) => img,
-                None => continue,
-            };
-
-            // Parse the current image
-            let (image_name, current_tag) = match parse_image_full(current_image) {
-                Ok(parts) => parts,
-                Err(e) => {
-                    warn!("Failed to parse image {}: {}", current_image, e);
-                    continue;
-                },
-            };
-
-            // Check if this container uses the image from the webhook event
-            let matches = images_match(&event.registry, &event.repository, &image_name);
-            if !matches {
-                continue;
-            }
-
-            info!(
-                "Found matching statefulset {}/{} container {} using {}",
-                statefulset.namespace().unwrap_or_default(),
-                statefulset.name_any(),
-                container.name,
-                current_image
-            );
-
-            // Skip if it's the same version
-            if current_tag == event.tag {
-                debug!(
-                    "Container {} already using tag {}, skipping",
-                    container.name, event.tag
-                );
-                continue;
-            }
-
-            // Call the update handler
-            if let Err(e) = crate::controller::handle_statefulset_image_update(
-                client,
-                policy_engine,
-                &statefulset,
-                &image_name,
-                &event.tag,
-            )
-            .await
-            {
-                error!(
-                    "Failed to handle image update for statefulset {}/{}: {}",
-                    statefulset.namespace().unwrap_or_default(),
-                    statefulset.name_any(),
-                    e
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Process DaemonSets for image update events
-async fn process_daemonsets(
-    client: &Client,
-    policy_engine: &Arc<PolicyEngine>,
-    event: &ImagePushEvent,
-) -> Result<()> {
-    let daemonsets: Api<DaemonSet> = Api::all(client.clone());
-    let daemonset_list = daemonsets.list(&Default::default()).await?;
-
-    debug!(
-        "Checking {} daemonsets for matching images",
-        daemonset_list.items.len()
-    );
-
-    for daemonset in daemonset_list.items {
-        // Check if daemonset has headwind annotations
-        let annotations = match &daemonset.metadata.annotations {
-            Some(ann) => ann,
-            None => continue,
-        };
-
-        // Skip if no policy annotation
-        if !annotations.contains_key(annotations::POLICY) {
-            continue;
-        }
-
-        // Check each container in the daemonset
-        let spec = match daemonset.spec.as_ref() {
-            Some(s) => s,
-            None => continue,
-        };
-
-        let template_spec = match spec.template.spec.as_ref() {
-            Some(s) => s,
-            None => continue,
-        };
-
-        for container in &template_spec.containers {
-            let current_image = match container.image.as_ref() {
-                Some(img) => img,
-                None => continue,
-            };
-
-            // Parse the current image
-            let (image_name, current_tag) = match parse_image_full(current_image) {
-                Ok(parts) => parts,
-                Err(e) => {
-                    warn!("Failed to parse image {}: {}", current_image, e);
-                    continue;
-                },
-            };
-
-            // Check if this container uses the image from the webhook event
-            let matches = images_match(&event.registry, &event.repository, &image_name);
-            if !matches {
-                continue;
-            }
-
-            info!(
-                "Found matching daemonset {}/{} container {} using {}",
-                daemonset.namespace().unwrap_or_default(),
-                daemonset.name_any(),
-                container.name,
-                current_image
-            );
-
-            // Skip if it's the same version
-            if current_tag == event.tag {
-                debug!(
-                    "Container {} already using tag {}, skipping",
-                    container.name, event.tag
-                );
-                continue;
-            }
-
-            // Call the update handler
-            if let Err(e) = crate::controller::handle_daemonset_image_update(
-                client,
-                policy_engine,
-                &daemonset,
-                &image_name,
-                &event.tag,
-            )
-            .await
-            {
-                error!(
-                    "Failed to handle image update for daemonset {}/{}: {}",
-                    daemonset.namespace().unwrap_or_default(),
-                    daemonset.name_any(),
-                    e
-                );
-            }
-        }
-    }
 
     Ok(())
 }
