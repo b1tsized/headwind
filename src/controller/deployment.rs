@@ -487,6 +487,21 @@ fn parse_policy_from_annotations(
             .collect();
     }
 
+    if let Some(event_source) = annotations.get(annotations::EVENT_SOURCE) {
+        policy.event_source = event_source.parse().map_err(|e| {
+            kube::Error::Api(kube::core::ErrorResponse {
+                status: "Error".to_string(),
+                message: format!("Failed to parse event source: {}", e),
+                reason: "InvalidEventSource".to_string(),
+                code: 400,
+            })
+        })?;
+    }
+
+    if let Some(polling_interval) = annotations.get(annotations::POLLING_INTERVAL) {
+        policy.polling_interval = polling_interval.parse().ok();
+    }
+
     Ok(policy)
 }
 

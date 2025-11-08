@@ -118,6 +118,8 @@ impl OciHelmClient {
             require_approval: true,
             min_update_interval: None,
             images: Vec::new(),
+            event_source: Default::default(),
+            polling_interval: None,
         };
 
         let mut valid_versions: Vec<String> = versions

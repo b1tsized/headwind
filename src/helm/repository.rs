@@ -248,6 +248,8 @@ impl HelmRepositoryClient {
                     require_approval: true,
                     min_update_interval: None,
                     images: Vec::new(),
+                    event_source: Default::default(),
+                    polling_interval: None,
                 };
 
                 match policy_engine.should_update(&resource_policy, current_version, v) {

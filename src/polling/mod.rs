@@ -417,6 +417,8 @@ impl RegistryPoller {
             require_approval: true,
             min_update_interval: None,
             images: vec![],
+            event_source: Default::default(),
+            polling_interval: None,
         };
 
         let policy_engine = PolicyEngine;
@@ -676,6 +678,8 @@ impl RegistryPoller {
             require_approval: true,
             min_update_interval: None,
             images: Vec::new(),
+            event_source: Default::default(),
+            polling_interval: None,
         };
 
         let mut best_version: Option<String> = None;
@@ -847,6 +851,8 @@ impl RegistryPoller {
             require_approval: true,
             min_update_interval: None,
             images: Vec::new(),
+            event_source: Default::default(),
+            polling_interval: None,
         };
 
         let mut best_version: Option<String> = None;
