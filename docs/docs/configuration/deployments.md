@@ -220,9 +220,34 @@ Example output:
 ]
 ```
 
+## Event Sources
+
+Control how Headwind detects updates for this Deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  annotations:
+    headwind.sh/policy: "minor"
+    # Use webhooks (default, fastest)
+    headwind.sh/event-source: "webhook"
+
+    # Or use polling (for registries without webhook support)
+    # headwind.sh/event-source: "polling"
+    # headwind.sh/polling-interval: "600"  # Poll every 10 minutes
+
+    # Or use both (redundant detection)
+    # headwind.sh/event-source: "both"
+```
+
+See [Event Sources](./event-sources.md) for detailed configuration options.
+
 ## Next Steps
 
 - [Configure Update Policies](../update-policies.md)
+- [Configure Event Sources](./event-sources.md) - Webhooks vs polling
 - [Set up Approval Workflow](./approval-workflow.md)
 - [Configure Automatic Rollback](./rollback.md)
 - [Working with UpdateRequests](../guides/update-requests.md)

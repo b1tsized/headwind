@@ -546,9 +546,31 @@ Check Headwind logs:
 kubectl logs -n headwind-system deployment/headwind | grep rollback
 ```
 
+## Event Sources
+
+Control how Headwind detects updates for this StatefulSet:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: my-database
+  annotations:
+    headwind.sh/policy: "patch"
+    # Use webhooks (default, fastest)
+    headwind.sh/event-source: "webhook"
+
+    # Or use polling with custom interval
+    # headwind.sh/event-source: "polling"
+    # headwind.sh/polling-interval: "600"
+```
+
+See [Event Sources](./event-sources.md) for detailed configuration options.
+
 ## Next Steps
 
 - [Update Policies](../update-policies.md) - Understand semantic versioning policies
+- [Configure Event Sources](./event-sources.md) - Webhooks vs polling
 - [Approval Workflow](./approval-workflow.md) - Configure approval process
 - [Rollback Configuration](./rollback.md) - Set up automatic rollback
 - [API Reference](../api/) - Approve updates via API

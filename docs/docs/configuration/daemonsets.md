@@ -790,9 +790,31 @@ kubectl get nodes --show-labels
 kubectl describe nodes | grep Taints
 ```
 
+## Event Sources
+
+Control how Headwind detects updates for this DaemonSet:
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+  annotations:
+    headwind.sh/policy: "patch"
+    # Use webhooks (default, fastest)
+    headwind.sh/event-source: "webhook"
+
+    # Or use polling
+    # headwind.sh/event-source: "polling"
+    # headwind.sh/polling-interval: "900"  # Poll every 15 minutes
+```
+
+See [Event Sources](./event-sources.md) for detailed configuration options.
+
 ## Next Steps
 
 - [Update Policies](../update-policies.md) - Understand semantic versioning policies
+- [Configure Event Sources](./event-sources.md) - Webhooks vs polling
 - [Approval Workflow](./approval-workflow.md) - Configure approval process
 - [Rollback Configuration](./rollback.md) - Set up automatic rollback
 - [Notifications](./notifications.md) - Configure Slack/Teams notifications
