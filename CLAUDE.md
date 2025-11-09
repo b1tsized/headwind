@@ -267,6 +267,7 @@ All workload controllers support the same set of Headwind annotations:
 - `src/ui/mod.rs` - Router and server initialization
 - `src/ui/routes.rs` - Route handlers (dashboard, detail, health)
 - `src/ui/templates.rs` - Maud templates with filtering/sorting/pagination
+- `src/ui/auth.rs` - Multi-mode authentication and audit logging
 - `src/static/css/custom.css` - Custom styles for status badges and UI elements
 
 **Routes**:
@@ -297,7 +298,46 @@ All workload controllers support the same set of Headwind annotations:
 - Integrates with approval API (port 8081) for update execution
 - Data attributes on table rows enable efficient filtering (`data-namespace`, `data-kind`, `data-policy`, `data-created-at`)
 
-**Status**: ✅ **FULLY FUNCTIONAL** - Complete web interface with filtering, sorting, pagination, and actions
+**Authentication** (`src/ui/auth.rs`):
+Headwind Web UI supports four authentication modes via `HEADWIND_UI_AUTH_MODE` environment variable:
+
+1. **None (default)**: No authentication
+   - All actions logged as "web-ui-user"
+   - Suitable for development or trusted environments
+
+2. **Simple**: Username from HTTP header
+   - Set `HEADWIND_UI_AUTH_MODE=simple`
+   - Reads username from `X-User` header
+   - Trusts the provided username (requires auth proxy upstream)
+   - Use case: Basic auth proxy (e.g., nginx with auth_request)
+
+3. **Token**: Kubernetes TokenReview validation
+   - Set `HEADWIND_UI_AUTH_MODE=token`
+   - Validates bearer tokens via Kubernetes TokenReview API
+   - Extracts authenticated username from token
+   - Requires RBAC permission: `authentication.k8s.io/tokenreviews` create
+   - Use case: Service account tokens, kubectl authentication
+   - Example: `curl -H "Authorization: Bearer $(cat token.txt)" http://localhost:8082/`
+
+4. **Proxy**: Ingress/proxy authentication headers
+   - Set `HEADWIND_UI_AUTH_MODE=proxy`
+   - Reads username from configurable header (default: `X-Forwarded-User`)
+   - Configure header name via `HEADWIND_UI_PROXY_HEADER` environment variable
+   - Use case: Kubernetes ingress with external auth (e.g., oauth2-proxy, Authelia)
+
+**Audit Logging**:
+- All approval/rejection actions logged with username, action, resource details, timestamp
+- Dedicated log target: `headwind::audit` (structured JSON logging)
+- Audit log fields: `timestamp`, `username`, `action`, `resource_type`, `namespace`, `name`, `result`, `reason`
+- Example: `{"timestamp":"2025-11-08T23:00:00Z","username":"alice","action":"approve","resource_type":"Deployment","namespace":"default","name":"test-approval-nginx-1-28-0","result":"success"}`
+
+**Technical Implementation**:
+- Uses Axum 0.8 native async traits (`FromRequestParts` trait) without `#[async_trait]` macro
+- `UserIdentity` extractor automatically handles authentication based on configured mode
+- TokenReview integration validates Kubernetes tokens and extracts service account usernames
+- All route handlers accept `UserIdentity` parameter for automatic user extraction
+
+**Status**: ✅ **FULLY FUNCTIONAL** - Complete web interface with filtering, sorting, pagination, actions, and multi-mode authentication
 
 #### 8. Metrics (`src/metrics/mod.rs`)
 - **Port**: 9090
