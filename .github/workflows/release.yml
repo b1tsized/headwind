@@ -120,10 +120,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Google Container Registry
+      - name: Set up Artifact Registry URL
+        id: gar
+        run: |
+          GAR_REGISTRY="${{ secrets.GAR_LOCATION }}-docker.pkg.dev"
+          GAR_IMAGE="${GAR_REGISTRY}/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}/headwind"
+          echo "registry=${GAR_REGISTRY}" >> $GITHUB_OUTPUT
+          echo "image=${GAR_IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Login to Google Artifact Registry
         uses: docker/login-action@v3
         with:
-          registry: gcr.io
+          registry: ${{ steps.gar.outputs.registry }}
           username: _json_key
           password: ${{ secrets.GCP_SA_KEY }}
 
@@ -133,7 +141,7 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-            gcr.io/${{ secrets.GCP_PROJECT_ID }}/headwind
+            ${{ steps.gar.outputs.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
