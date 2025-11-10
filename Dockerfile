@@ -1,13 +1,11 @@
-# Build stage - use Debian 12 (bookworm) to match distroless base
-FROM rust:1.90-slim-bookworm AS builder
+# Build stage - using Chainguard's Rust image with dev tools
+FROM cgr.dev/chainguard/rust:latest-dev AS builder
 
-WORKDIR /usr/src/headwind
+USER root
+RUN apk add --no-cache openssl-dev pkgconf
+USER nonroot
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
@@ -18,16 +16,21 @@ COPY src ./src
 # Build the application
 RUN cargo build --release
 
-# Runtime stage - using distroless for minimal attack surface
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Runtime stage - using Chainguard's wolfi-base
+# Includes glibc, OpenSSL, and CA certificates
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 WORKDIR /app
 
 # Copy the binary from builder
-COPY --from=builder /usr/src/headwind/target/release/headwind /app/headwind
+COPY --from=builder /app/target/release/headwind /app/headwind
 
-# Distroless nonroot image runs as UID 65532 (nonroot user)
+# Chainguard images run as non-root by default (UID 65532)
 # No shell, no package managers - minimal attack surface
+# Includes CA certificates, glibc, and OpenSSL
+
+# Explicitly set non-root user (Chainguard default is already 65532, but setting for security scanners)
+USER 65532
 
 # Expose ports
 EXPOSE 8080 8081 8082 9090
