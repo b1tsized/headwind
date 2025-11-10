@@ -1,21 +1,12 @@
-# Headwind Helm Charts
+# Helm Chart Repository
 
-This directory contains the Helm chart repository index for Headwind.
+The Headwind Helm chart repository is available at: https://headwind.sh/charts/
 
-The chart repository is automatically updated by the helm-release workflow when changes are made to charts in the repository.
-
-## Usage
-
-Add the Helm repository:
+## Quick Start
 
 ```bash
 helm repo add headwind https://headwind.sh/charts
 helm repo update
-```
-
-Install Headwind:
-
-```bash
 helm install headwind headwind/headwind -n headwind-system --create-namespace
 ```
 
