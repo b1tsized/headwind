@@ -4,6 +4,8 @@
 [![Security](https://github.com/headwind-sh/headwind/actions/workflows/security.yml/badge.svg)](https://github.com/headwind-sh/headwind/actions/workflows/security.yml)
 [![Release](https://github.com/headwind-sh/headwind/actions/workflows/release.yml/badge.svg)](https://github.com/headwind-sh/headwind/actions/workflows/release.yml)
 [![Documentation](https://github.com/headwind-sh/headwind/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/headwind-sh/headwind/actions/workflows/deploy-docs.yml)
+[![Crates.io](https://img.shields.io/crates/v/headwind.svg)](https://crates.io/crates/headwind)
+[![License](https://img.shields.io/crates/l/headwind.svg)](https://github.com/headwind-sh/headwind/blob/main/LICENSE)
 
 A Kubernetes operator for automating workload updates based on container image changes, written in Rust.
 
