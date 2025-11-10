@@ -1,5 +1,5 @@
-# Build stage
-FROM rust:1.90-slim AS builder
+# Build stage - use Debian 12 (bookworm) to match distroless base
+FROM rust:1.90-slim-bookworm AS builder
 
 WORKDIR /usr/src/headwind
 
@@ -18,29 +18,18 @@ COPY src ./src
 # Build the application
 RUN cargo build --release
 
-# Runtime stage
-FROM ubuntu:24.04
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN useradd -m -u 1001 headwind
+# Runtime stage - using distroless for minimal attack surface
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 WORKDIR /app
 
 # Copy the binary from builder
 COPY --from=builder /usr/src/headwind/target/release/headwind /app/headwind
 
-# Change ownership
-RUN chown -R headwind:headwind /app
-
-USER headwind
+# Distroless nonroot image runs as UID 65532 (nonroot user)
+# No shell, no package managers - minimal attack surface
 
 # Expose ports
-EXPOSE 8080 8081 9090
+EXPOSE 8080 8081 8082 9090
 
 ENTRYPOINT ["/app/headwind"]
