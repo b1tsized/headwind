@@ -104,8 +104,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Upload bare binary (existing behavior)
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
           gh release upload ${{ github.ref_name }} ${{ matrix.asset_name }}
+
+      - name: Create Krew-compatible archive
+        run: |
+          # Create directory for Krew archive
+          mkdir -p krew-package
+          # Determine binary extension
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          # Copy and rename binary to kubectl-headwind
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} \
+            krew-package/kubectl-headwind${EXT}
+          # Copy LICENSE for proper attribution
+          cp LICENSE krew-package/
+          # Create tar.gz archive
+          ARCHIVE="kubectl-headwind-${{ matrix.asset_name }}.tar.gz"
+          tar -czf "${ARCHIVE}" -C krew-package .
+
+      - name: Generate checksum
+        run: |
+          # Generate SHA256 checksum
+          ARCHIVE="kubectl-headwind-${{ matrix.asset_name }}.tar.gz"
+          CHECKSUM="${ARCHIVE}.sha256"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            certutil -hashfile "${ARCHIVE}" SHA256 | \
+              findstr /v ":" | findstr /v "SHA256" > "${CHECKSUM}"
+          else
+            shasum -a 256 "${ARCHIVE}" | awk '{print $1}' > "${CHECKSUM}"
+          fi
+          echo "SHA256: $(cat ${CHECKSUM})"
+
+      - name: Upload Krew archive to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            kubectl-headwind-${{ matrix.asset_name }}.tar.gz \
+            kubectl-headwind-${{ matrix.asset_name }}.tar.gz.sha256
 
   # Publish to crates.io
   publish-crate:
